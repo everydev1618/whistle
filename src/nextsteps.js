@@ -2,6 +2,7 @@
 // what the user would likely send next, in their own voice, and cache it per turn.
 // Runs through the `claude` CLI so it uses the machine's existing Claude login.
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const MODEL = 'claude-haiku-5-5';
@@ -74,10 +75,33 @@ export class NextSteps {
   #queue = [];
   #active = 0;
 
-  constructor({ run = p => runClaude(p), concurrency = 2, log = console.error } = {}) {
+  // With `file`, answers are saved there so a restart doesn't ask again.
+  // Failures are never saved, so they get retried after a restart.
+  constructor({ run = p => runClaude(p), concurrency = 2, log = console.error, file = null } = {}) {
     this.run = run;
     this.concurrency = concurrency;
     this.log = log;
+    this.file = file;
+    this.#saved = new Set();
+    if (file) {
+      try {
+        const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+        for (const [k, v] of Object.entries(data)) if (Array.isArray(v)) { this.#cache.set(k, v); this.#saved.add(k); }
+      } catch { /* missing or corrupt: start empty */ }
+    }
+  }
+
+  #saved;
+
+  #save() {
+    if (!this.file) return;
+    try {
+      const data = Object.fromEntries([...this.#cache].filter(([k, v]) => v && this.#saved.has(k)));
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      const tmp = `${this.file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(data));
+      fs.renameSync(tmp, this.file);
+    } catch (e) { this.log(`could not save next steps: ${e.message}`); }
   }
 
   // Returns cached suggestions, or null while they are being worked out;
@@ -85,7 +109,11 @@ export class NextSteps {
   get(key, ctx, onReady) {
     if (this.#cache.has(key)) return this.#cache.get(key);
     this.#cache.set(key, null);
-    if (this.#cache.size > MAX_CACHE) this.#cache.delete(this.#cache.keys().next().value);
+    if (this.#cache.size > MAX_CACHE) {
+      const oldest = this.#cache.keys().next().value;
+      this.#cache.delete(oldest);
+      this.#saved.delete(oldest);
+    }
     this.#queue.push({ key, ctx, onReady });
     this.#pump();
     return null;
@@ -97,9 +125,10 @@ export class NextSteps {
       this.#active++;
       Promise.resolve()
         .then(() => this.run(buildPrompt(ctx)))
-        .then(cleanSuggestions, e => { this.log(`next steps failed: ${e.message}`); return []; })
-        .then(s => {
+        .then(out => ({ ok: true, s: cleanSuggestions(out) }), e => { this.log(`next steps failed: ${e.message}`); return { ok: false, s: [] }; })
+        .then(({ ok, s }) => {
           this.#cache.set(key, s);
+          if (ok) { this.#saved.add(key); this.#save(); }
           this.#active--;
           try { onReady(); } finally { this.#pump(); }
         });

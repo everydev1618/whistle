@@ -19,6 +19,7 @@ const allowedUsers = (process.env.WHISTLE_ALLOWED_USERS || '').split(',').map(s 
 
 // Next-step buttons from Haiku via the `claude` CLI. WHISTLE_NEXT_STEPS=off turns them off.
 const nextSteps = process.env.WHISTLE_NEXT_STEPS === 'off' ? null : new NextSteps({
+  file: path.join(stateDir, 'nextsteps.json'),
   run: prompt => runClaude(prompt, { bin: process.env.WHISTLE_CLAUDE_BIN || 'claude', configDir: process.env.WHISTLE_CLAUDE_CONFIG_DIR }),
 });
 

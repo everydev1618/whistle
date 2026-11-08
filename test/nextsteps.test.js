@@ -70,3 +70,32 @@ test('runs at most `concurrency` at once', async () => {
   assert.equal(done.length, 5);
   assert.equal(peak, 2);
 });
+
+test('with a file, answers survive a restart and are not asked again', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-ns-')), 'state', 'nextsteps.json');
+  let calls = 0;
+  const run = async () => { calls++; return { suggestions: [{ label: 'Add tests', text: 'add tests' }] }; };
+  const a = new NextSteps({ run, file });
+  a.get('k1', ctx, () => {});
+  await tick();
+  const b = new NextSteps({ run, file });
+  assert.deepEqual(b.get('k1', ctx, () => { throw new Error('should not ask again'); }), [{ label: 'Add tests', text: 'add tests' }]);
+  assert.equal(calls, 1);
+});
+
+test('failures are not saved, so a restart retries them; a corrupt file is ignored', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-ns-')), 'nextsteps.json');
+  const a = new NextSteps({ run: async () => { throw new Error('down'); }, file, log: () => {} });
+  a.get('k', ctx, () => {});
+  await tick();
+  const b = new NextSteps({ run: async () => ({ suggestions: [] }), file });
+  assert.equal(b.get('k', ctx, () => {}), null, 'asks again');
+  fs.writeFileSync(file, '{oops');
+  assert.equal(new NextSteps({ file }).get('z', ctx, () => {}) === null, true);
+});

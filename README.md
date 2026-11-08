@@ -36,7 +36,7 @@ Share → Add to Home Screen.
 | `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
 | `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
-| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`) and seen/done marks (`marks.json`) |
+| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), cached Haiku suggestions (`nextsteps.json`) |
 | `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
@@ -76,7 +76,7 @@ Three layers, merged in this order (max 4, no repeats):
    and how each project gets deployed ("deploy it to vercel at pace.example.com", "ship it").
 3. **Next steps from Claude Haiku 5.5** (`src/nextsteps.js`): when an agent finishes a turn, one
    `claude -p` call (structured JSON, no tools, no session saved) reads the turn and suggests up
-   to 3 prompts in your voice. Cached per turn, 2 at a time. About 2s and $0.0003 each.
+   to 3 prompts in your voice. Cached per turn on disk (survives restarts; failures are retried), 2 at a time. About 2s and $0.0003 each.
 
 In the session view a model button shows the prompt it will send; long-press any button to
 edit its text before sending.
