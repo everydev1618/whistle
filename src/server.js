@@ -1,0 +1,95 @@
+// HTTP API for the phone. Meant to sit on 127.0.0.1 behind `tailscale serve`,
+// which adds the Tailscale-User-Login header we check against allowedUsers.
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { HerdrError } from './herdr.js';
+
+const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+const STATUS_FOR = { agent_blocked: 409, agent_not_found: 404, not_found: 404, unreachable: 503, timeout: 504 };
+
+const send = (res, code, body) => {
+  res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
+};
+const fail = (res, code, errCode, message) => send(res, code, { error: { code: errCode, message } });
+
+async function readJson(req) {
+  let size = 0;
+  const chunks = [];
+  for await (const c of req) {
+    size += c.length;
+    if (size > 64 * 1024) throw new HerdrError('too_large', 'request body too large');
+    chunks.push(c);
+  }
+  try { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
+}
+
+export function createServer({ hub, allowedUsers = [] }) {
+  return http.createServer(async (req, res) => {
+    if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
+      return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
+    }
+    const url = new URL(req.url, 'http://x');
+    const parts = url.pathname.split('/').filter(Boolean);
+    try {
+      if (parts[0] !== 'api') return serveStatic(url.pathname, res);
+
+      if (req.method === 'GET' && parts[1] === 'agents' && parts.length === 2) {
+        return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [] });
+      }
+      if (req.method === 'GET' && parts[1] === 'events' && parts.length === 2) return events(req, res, hub);
+
+      if (parts[1] === 'agents' && parts[2]) {
+        const id = decodeURIComponent(parts[2]);
+        if (req.method === 'GET' && parts.length === 3) {
+          const d = await hub.detail(id);
+          return d ? send(res, 200, d) : fail(res, 404, 'not_found', `No agent ${id}`);
+        }
+        if (req.method === 'POST' && parts[3] === 'prompt') {
+          const { text } = await readJson(req);
+          if (typeof text !== 'string' || !text.trim()) return fail(res, 400, 'empty_prompt', 'Prompt text is empty.');
+          await hub.prompt(id, text);
+          return send(res, 202, { ok: true });
+        }
+        if (req.method === 'POST' && parts[3] === 'keys') {
+          const { keys } = await readJson(req);
+          if (!Array.isArray(keys) || !keys.length || !keys.every(k => typeof k === 'string')) return fail(res, 400, 'bad_keys', 'keys must be a list of key names.');
+          await hub.keys(id, keys);
+          return send(res, 202, { ok: true });
+        }
+      }
+      return fail(res, 404, 'not_found', 'No such endpoint.');
+    } catch (e) {
+      if (e instanceof HerdrError) {
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json'].includes(e.code) ? 400 : 502);
+        return fail(res, code, e.code, e.message);
+      }
+      console.error(e);
+      return fail(res, 500, 'internal', 'Something broke in whistle. Check its log.');
+    }
+  });
+}
+
+function events(req, res, hub) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+  const write = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  write('snapshot', { agents: hub.agents(), sessions: hub.sessions?.() ?? [] });
+  const onChange = ev => write('change', ev);
+  hub.on('change', onChange);
+  const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
+  req.on('close', () => { clearInterval(ping); hub.off('change', onChange); });
+}
+
+function serveStatic(pathname, res) {
+  const rel = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
+  const file = path.resolve(PUBLIC, rel);
+  if (!file.startsWith(PUBLIC + path.sep)) return fail(res, 404, 'not_found', 'Not found.');
+  fs.readFile(file, (err, data) => {
+    if (err) return fail(res, 404, 'not_found', 'Not found.');
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    res.end(data);
+  });
+}

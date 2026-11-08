@@ -1,0 +1,20 @@
+{
+  "name": "whistle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Steer your herdr agents from your phone with taps instead of a terminal.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.14.0"
+  }
+}
