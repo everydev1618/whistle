@@ -36,7 +36,7 @@ Share → Add to Home Screen.
 | `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
 | `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
-| `WHISTLE_PREFS` | `~/.config/whistle/prefs.json` | per-user settings such as the selected filter |
+| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`) and seen/done marks (`marks.json`) |
 | `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
@@ -59,6 +59,7 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 | `POST /api/agents/:id/prompt` | `{ "text": "push it" }` → `agent.prompt` |
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
 | `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed) |
+| `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
 | `GET` / `PUT /api/prefs` | the caller's settings, e.g. `{ "filter": "Work" }`, keyed by Tailscale login |
 
 Each agent carries `summary`, `lastPrompt`, `live` (current step), `question` (when blocked)

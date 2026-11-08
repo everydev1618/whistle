@@ -52,6 +52,7 @@ code { font-family: var(--f-mono); font-size: .86em }
 .card p { margin: 0; font-size: 13.5px; color: var(--muted); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden }
 .card .q { color: var(--ink); font-weight: 600 }
 .swipehint { position: absolute; inset: 0; border-radius: 18px; background: var(--done); color: #fff; display: flex; align-items: center; padding-left: 18px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; z-index: -1 }
+.swipehint.left { background: var(--idle); justify-content: flex-end; padding: 0 18px 0 0 }
 .card.sent { opacity: .55 }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; text-transform: uppercase; letter-spacing: .05em; flex: none }
@@ -138,5 +139,8 @@ code { font-family: var(--f-mono); font-size: .86em }
 .sheet button { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 11px 12px; text-align: left; font-weight: 600 }
 .sheet button small { display: block; color: var(--muted); font-weight: 400; font-size: 12px }
 .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 19 }
-.toast { position: fixed; left: 50%; bottom: calc(110px + var(--bottom)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; z-index: 30; max-width: 90vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.toast { position: fixed; left: 50%; bottom: calc(110px + var(--bottom)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; z-index: 30; max-width: 90vw; white-space: nowrap; display: flex; align-items: center; gap: 12px }
+.toast span { overflow: hidden; text-overflow: ellipsis }
+.toast button { all: unset; cursor: pointer; color: var(--accent-soft, #9db0ff); font-weight: 700; padding: 2px 0 }
+.toast[hidden] { display: none }
 @media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run { animation: none } .card { transition: none } }

@@ -1,4 +1,5 @@
 import { mdBlocks } from './md.js';
+import { groupAgents, isSeen, turnKey } from './herd.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -13,6 +14,7 @@ const state = {
   showAllTurns: false,
   sent: new Set(),     // agents we just sent to, shown dimmed until herdr reports work
   stopArmed: null,
+  marks: {},          // { agentId: { seen, done } } per turn, saved on the server
 };
 
 // The saved filter, unless its session is gone, then All (the choice stays saved).
@@ -28,6 +30,30 @@ function setFilter(f, { save = true } = {}) {
   localSet('whistle.filter', f);
   if (save) fetch('/api/prefs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filter: f }) }).catch(() => {});
   if (!state.openId) renderHerd();
+}
+
+function loadMarks() {
+  api('/api/marks').then(m => { state.marks = m; render(); }).catch(() => {});
+}
+
+// Optimistic: update locally, then tell the server.
+function mark(id, kind) {
+  const a = state.agents.get(id);
+  if (!a) return;
+  const turn = turnKey(a);
+  const entry = { ...state.marks[id] };
+  if (kind === 'undone') delete entry.done; else entry[kind] = turn;
+  state.marks = { ...state.marks, [id]: entry };
+  fetch('/api/marks', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, kind, turn }) }).catch(() => {});
+}
+
+function markDone(id) {
+  const a = state.agents.get(id);
+  mark(id, 'seen');
+  mark(id, 'done');
+  if (state.openId === id) location.hash = '';
+  else render();
+  toast(`Done with ${a?.title || a?.project || 'agent'}`, { label: 'Undo', run: () => { mark(id, 'undone'); render(); } });
 }
 
 function loadPrefs() {
@@ -92,9 +118,11 @@ function stop(id) {
 }
 
 // ---------- herd ----------
-const PILL = { blocked: 'Asking', done: 'Finished', idle: 'Finished', working: 'Working' };
-const RECENT_MS = 24 * 3600 * 1000;
-const when = a => (a.endedAt ? Date.parse(a.endedAt) : 0);
+// Finished agents read "New" until you've opened them (or seen them in herdr).
+const pillText = a => ({ blocked: 'Asking', working: 'Working' }[a.status] || (isSeen(a, state.marks) ? 'Finished' : 'New'));
+const pillClass = a => (a.status === 'done' || a.status === 'idle' ? (isSeen(a, state.marks) ? 'idle' : 'done') : a.status);
+const pillHtml = a => `<span class="pill ${pillClass(a)}">${pillText(a)}</span>`;
+const doneChip = id => `<button class="chip ghost" data-done="${esc(id)}">Done</button>`;
 
 function ago(iso) {
   if (!iso) return '';
@@ -122,16 +150,12 @@ function sessionTag(a) { return a.session !== 'default' ? `<span class="tag">${e
 
 function renderHerd() {
   const list = visible();
-  // Asking: stuck until you answer. Finished: ended a turn in the last day, your move.
-  // Earlier: everything quieter or older.
-  const byRecent = (x, y) => when(y) - when(x);
-  const recent = a => Date.now() - when(a) < RECENT_MS;
-  const asking = list.filter(a => a.status === 'blocked').sort(byRecent);
-  const finished = list.filter(a => (a.status === 'done' || a.status === 'idle') && recent(a)).sort(byRecent);
-  const working = list.filter(a => a.status === 'working').sort(byRecent);
-  const earlier = list.filter(a => !asking.includes(a) && !finished.includes(a) && !working.includes(a)).sort(byRecent);
+  // Asking: stuck until you answer. Finished: ended a turn in the last day and you
+  // haven't marked it done (new ones first). Earlier: everything quieter or older.
+  const { asking, finished, working, earlier } = groupAgents(list, state.marks);
+  const fresh = finished.filter(a => !isSeen(a, state.marks)).length;
 
-  $('#count').textContent = [asking.length && `${asking.length} asking`, `${finished.length} finished`, `${working.length} working`].filter(Boolean).join(' · ');
+  $('#count').textContent = [asking.length && `${asking.length} asking`, fresh && `${fresh} new`, `${finished.length} finished`, `${working.length} working`].filter(Boolean).join(' · ');
 
   const counts = new Map();
   for (const a of state.agents.values()) counts.set(a.session, (counts.get(a.session) || 0) + 1);
@@ -142,7 +166,7 @@ function renderHerd() {
 
   $('#g-asking').hidden = !asking.length;
   $('#asking').innerHTML = asking.map(card).join('');
-  $('#finished').innerHTML = finished.map(card).join('') || '<p class="empty">Nothing finished in the last day.</p>';
+  $('#finished').innerHTML = finished.map(card).join('') || '<p class="empty">All caught up.</p>';
 
   $('#working').innerHTML = working.map(a => `
     <article class="card" data-id="${esc(a.id)}">
@@ -164,48 +188,62 @@ function card(a) {
   const body = a.question
     ? `<p class="q">${esc(a.question.question)}</p>`
     : a.summary ? `<p>${esc(a.summary)}</p>` : '';
-  const chips = sent ? '' : chipHtml(a.id, a.suggestions.slice(0, 3));
+  const finished = a.status !== 'blocked';
+  const chips = sent ? '' : chipHtml(a.id, a.suggestions.slice(0, 3)) + (finished ? doneChip(a.id) : '');
   return `<article class="card${sent ? ' sent' : ''}" data-id="${esc(a.id)}">
     ${a.suggestions[0] && !sent ? `<div class="swipehint">${esc(a.suggestions[0].label)} ›</div>` : ''}
-    <div class="meta"><span class="pill ${a.status}">${PILL[a.status] || a.status}</span>${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${sent ? 'sent' : ago(a.endedAt)}</span></div>
+    ${finished && !sent ? '<div class="swipehint left">‹ Done</div>' : ''}
+    <div class="meta">${pillHtml(a)}${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${sent ? 'sent' : ago(a.endedAt)}</span></div>
     <button class="open" data-open="${esc(a.id)}"><h2>${esc(a.title)}</h2>${body}</button>
     ${chips ? `<div class="chips">${chips}</div>` : ''}
   </article>`;
 }
 
+// Swipe right sends the top suggestion; swipe left marks a finished agent done.
 function bindSwipes() {
   for (const card of document.querySelectorAll('#asking .card, #finished .card')) {
     const id = card.dataset.id;
     const a = state.agents.get(id);
-    const top = a?.suggestions?.[0];
-    if (!top || state.sent.has(id)) continue;
-    const hint = $('.swipehint', card);
+    if (!a || state.sent.has(id)) continue;
+    const top = a.suggestions?.[0];
+    const canDone = a.status !== 'blocked';
+    if (!top && !canDone) continue;
+    const right = $('.swipehint:not(.left)', card), left = $('.swipehint.left', card);
     let x0 = null, y0 = 0, dx = 0;
     card.addEventListener('pointerdown', e => { if (e.target.closest('.chip')) return; x0 = e.clientX; y0 = e.clientY; dx = 0; });
     card.addEventListener('pointermove', e => {
       if (x0 === null) return;
-      dx = Math.max(0, e.clientX - x0);
+      dx = e.clientX - x0;
+      if (dx > 0 && !top) dx = 0;
+      if (dx < 0 && !canDone) dx = 0;
       if (!card.classList.contains('dragging')) {
         if (Math.abs(e.clientY - y0) > 12) { x0 = null; return; } // vertical scroll wins
-        if (dx < 10) return;
+        if (Math.abs(dx) < 10) return;
         card.classList.add('dragging');
         card.setPointerCapture(e.pointerId);
       }
       card.style.transform = `translateX(${dx}px)`;
-      hint.style.opacity = Math.min(1, dx / 110);
-      hint.style.zIndex = 0;
+      for (const [hint, on] of [[right, dx > 0], [left, dx < 0]]) {
+        if (!hint) continue;
+        hint.style.opacity = on ? Math.min(1, Math.abs(dx) / 110) : 0;
+        hint.style.zIndex = on ? 0 : -1;
+      }
     });
     const end = () => {
       if (x0 === null) return;
       x0 = null;
       const dragged = card.classList.contains('dragging');
       card.classList.remove('dragging');
-      if (dragged && dx > 110) {
-        card.style.transform = 'translateX(110%)';
+      if (dragged && Math.abs(dx) > 110) {
+        card.style.transform = `translateX(${dx > 0 ? 110 : -110}%)`;
         card.style.opacity = 0;
         navigator.vibrate?.(10);
-        setTimeout(() => act(id, top), 180);
-      } else { card.style.transform = ''; hint.style.opacity = 0; }
+        setTimeout(() => (dx > 0 ? act(id, top) : markDone(id)), 180);
+      } else {
+        card.style.transform = '';
+        if (right) right.style.opacity = 0;
+        if (left) left.style.opacity = 0;
+      }
       if (dragged) card.addEventListener('click', e => e.stopPropagation(), { capture: true, once: true });
     };
     card.addEventListener('pointerup', end);
@@ -259,8 +297,9 @@ function renderSession() {
   $('#s-title').textContent = a.title || a.project;
   $('#s-sub').textContent = `${a.project} · ${a.session}/${a.paneId}`;
   const pill = $('#s-pill');
-  pill.className = `pill ${a.status}`;
-  pill.textContent = PILL[a.status] || a.status;
+  pill.className = `pill ${pillClass(a)}`;
+  pill.textContent = pillText(a);
+  if ((a.status === 'done' || a.status === 'idle') && !isSeen(a, state.marks)) mark(a.id, 'seen');
 
   const scroller = $('#s-scroll');
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
@@ -291,6 +330,7 @@ function renderSession() {
   let dock = chipHtml(a.id, chips, { full: true });
   if (a.status === 'working') dock += `<button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button>`;
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
+  if (a.status === 'done' || a.status === 'idle') dock += doneChip(a.id);
   $('#s-chips').innerHTML = dock;
   if (nearBottom || !scroller.dataset.seen) { scroller.scrollTop = scroller.scrollHeight; scroller.dataset.seen = '1'; }
 }
@@ -341,12 +381,13 @@ function route() {
 function render() { if (state.openId) renderSession(); else renderHerd(); }
 
 let toastT;
-function toast(msg) {
+function toast(msg, action) {
   const t = $('#toast');
-  t.textContent = msg;
+  t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
+  if (action) $('button', t).onclick = () => { t.hidden = true; action.run(); };
   t.hidden = false;
   clearTimeout(toastT);
-  toastT = setTimeout(() => { t.hidden = true; }, 2600);
+  toastT = setTimeout(() => { t.hidden = true; }, action ? 5000 : 2600);
 }
 
 // ---------- events ----------
@@ -379,13 +420,14 @@ document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]
 
 document.addEventListener('click', e => {
   if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
-  const el = e.target.closest('[data-act],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
+  const el = e.target.closest('[data-act],[data-done],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.act) {
     const a = state.agents.get(el.dataset.act);
     const chip = a?.suggestions?.[Number(el.dataset.i)];
     if (chip) act(a.id, chip);
-  } else if (el.dataset.open) location.hash = `a=${encodeURIComponent(el.dataset.open)}`;
+  } else if (el.dataset.done) markDone(el.dataset.done);
+  else if (el.dataset.open) location.hash = `a=${encodeURIComponent(el.dataset.open)}`;
   else if (el.dataset.filter) setFilter(el.dataset.filter);
   else if (el.dataset.stop) stop(el.dataset.stop);
   else if (el.dataset.esc) act(el.dataset.esc, { keys: ['esc'], label: 'Esc' });
@@ -426,4 +468,5 @@ setInterval(() => { if (!state.openId) renderHerd(); }, 30_000); // keep "5m ago
 connect();
 route();
 loadPrefs();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) loadPrefs(); });
+loadMarks();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadPrefs(); loadMarks(); } });
