@@ -9,7 +9,8 @@
   <dict>
     <key>PORT</key><string>7717</string>
     <key>WHISTLE_ALLOWED_USERS</key><string>you@example.com</string>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/Users/me/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>WHISTLE_CLAUDE_CONFIG_DIR</key><string>/Users/me/.claude-work</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

@@ -10,17 +10,23 @@ import { rpc as defaultRpc, listAllAgents, HerdrError } from './herdr.js';
 import { findTranscript, readEntries } from './claude.js';
 import { parseTranscript } from './transcript.js';
 import { parseQuestionScreen } from './screen.js';
-import { suggest } from './suggest.js';
+import { suggest, mergeSuggestions } from './suggest.js';
+import { DEFAULT_VOCAB } from './vocab.js';
 import { diffAgents } from './state.js';
 
 const EMPTY = { lastPrompt: null, summary: null, live: null, steps: 0, files: 0, endedAt: null, question: null, suggestions: [] };
 
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
-const plain = s => s.replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
+const plain = s => s.replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
 
-export function summarize(agent, transcript, question) {
+const FINISHED = new Set(['done', 'idle']);
+
+// `model` is the list of next steps from the model, if any have landed.
+export function summarize(agent, transcript, question, { vocab = DEFAULT_VOCAB, model = null } = {}) {
+  const rules = suggest({ status: agent.status, question, transcript, cwd: agent.cwd, vocab });
+  const suggestions = model && !question ? mergeSuggestions(rules, model) : rules;
   const last = transcript?.turns?.at(-1);
-  if (!last) return { ...EMPTY, question, suggestions: suggest({ status: agent.status, question, transcript }) };
+  if (!last) return { ...EMPTY, question, suggestions };
   const lastPara = last.answer.split(/\n\s*\n/).at(-1) || '';
   const running = [...last.steps].reverse().find(s => s.ok === null) || last.steps.at(-1);
   return {
@@ -31,7 +37,7 @@ export function summarize(agent, transcript, question) {
     files: Object.keys(last.files).length,
     endedAt: last.endedAt ?? null,
     question,
-    suggestions: suggest({ status: agent.status, question, transcript }),
+    suggestions,
   };
 }
 
@@ -39,12 +45,15 @@ export class Hub extends EventEmitter {
   #raw = new Map();     // id -> agent as herdr reports it
   #extra = new Map();   // id -> summary fields
   #tx = new Map();      // id -> { path, mtimeMs, transcript }
+  #questions = new Map(); // id -> question parsed off the screen
   #sessions = [];
   #polling = null;
   #timer = null;
 
-  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500 }) {
+  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null }) {
     super();
+    this.vocab = vocab;
+    this.nextSteps = nextSteps;
     this.listSessions = sessions;
     this.rpc = rpc;
     this.claudeDir = claudeDir;
@@ -67,7 +76,7 @@ export class Hub extends EventEmitter {
     this.#raw = new Map(agents.map(a => [a.id, a]));
     this.#sessions = sessions;
     const moved = new Set(events.filter(e => e.agent).map(e => e.agent.id));
-    for (const e of events) if (e.type === 'removed') { this.#extra.delete(e.id); this.#tx.delete(e.id); }
+    for (const e of events) if (e.type === 'removed') { this.#extra.delete(e.id); this.#tx.delete(e.id); this.#questions.delete(e.id); }
 
     const enriched = await Promise.all(agents.map(a => this.#enrich(a, moved.has(a.id)).catch(() => false)));
     for (const e of events) this.emit('change', e.agent ? { ...e, agent: this.#merged(e.agent.id) } : e);
@@ -96,10 +105,38 @@ export class Hub extends EventEmitter {
       const r = await this.rpc(socket, 'agent.read', { target: agent.paneId, source: 'visible' });
       question = parseQuestionScreen(r.read?.text ?? r.text ?? '');
     }
-    const next = summarize(agent, tx.transcript, question);
-    const prev = this.#extra.get(agent.id);
-    this.#extra.set(agent.id, next);
+    this.#questions.set(agent.id, question);
+    return this.#summarize(agent.id);
+  }
+
+  // Recomputes the summary fields from what is cached; true when they changed.
+  #summarize(id) {
+    const agent = this.#raw.get(id);
+    if (!agent) return false;
+    const tx = this.#tx.get(id);
+    const question = this.#questions.get(id) ?? null;
+    const model = this.#modelSteps(agent, tx, question);
+    const next = summarize(agent, tx?.transcript, question, { vocab: this.vocab, model });
+    const prev = this.#extra.get(id);
+    this.#extra.set(id, next);
     return JSON.stringify(prev) !== JSON.stringify(next);
+  }
+
+  #modelSteps(agent, tx, question) {
+    const transcript = tx?.transcript;
+    const turn = transcript?.turns?.at(-1);
+    if (!this.nextSteps || question || !FINISHED.has(agent.status) || !turn?.answer) return null;
+    const key = `${tx.path}#${transcript.totalTurns}#${turn.answer.length}`;
+    const ctx = {
+      project: agent.project,
+      turn,
+      existing: suggest({ status: agent.status, question, transcript, cwd: agent.cwd, vocab: this.vocab }),
+      vocab: this.vocab,
+    };
+    return this.nextSteps.get(key, ctx, () => {
+      const now = this.#raw.get(agent.id);
+      if (now && this.#summarize(agent.id)) this.emit('change', { type: 'changed', agent: this.#merged(agent.id), from: now.status });
+    });
   }
 
   start() {

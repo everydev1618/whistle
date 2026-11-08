@@ -36,6 +36,9 @@ Share → Add to Home Screen.
 | `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
 | `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
+| `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
+| `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
+| `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
 
 ## How a pane becomes a transcript
 
@@ -58,6 +61,22 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 
 Each agent carries `summary`, `lastPrompt`, `live` (current step), `question` (when blocked)
 and `suggestions` (buttons that send `text` as a prompt or `keys` as key presses).
+
+## Reply buttons
+
+Three layers, merged in this order (max 4, no repeats):
+
+1. **The agent's state** (`src/suggest.js`): question options (sent as number keys), offers
+   ("Want me to deploy it?" → **Yes, deploy it**; "push now or wait?" → one button each),
+   push when files changed and nothing was pushed, deploy once pushed.
+2. **Your wording** (`src/vocab.js`): learned from every `history.jsonl`, e.g. how you say push,
+   and how each project gets deployed ("deploy it to vercel at pace.example.com", "ship it").
+3. **Next steps from Claude Haiku 5.5** (`src/nextsteps.js`): when an agent finishes a turn, one
+   `claude -p` call (structured JSON, no tools, no session saved) reads the turn and suggests up
+   to 3 prompts in your voice. Cached per turn, 2 at a time. About 2s and $0.0003 each.
+
+In the session view a model button shows the prompt it will send; long-press any button to
+edit its text before sending.
 
 ## Questions
 

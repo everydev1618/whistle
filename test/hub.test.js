@@ -81,7 +81,7 @@ test('agents carry a summary, the live step and buttons from their transcript, a
   [a] = hub.agents();
   assert.equal(a.summary, 'Want me to push?');
   assert.equal(a.live, null);
-  assert.deepEqual(a.suggestions.map(s => s.label), ['Yes', 'No']);
+  assert.deepEqual(a.suggestions.map(s => s.label), ['Yes, push', 'No']);
   assert.equal(events.at(-1).agent.summary, 'Want me to push?');
 
   const screen = fs.readFileSync(new URL('./fixtures/question-screen.txt', import.meta.url), 'utf8');
@@ -112,4 +112,50 @@ test('detail reads the pane\'s transcript', async () => {
   assert.equal(d.transcript.turns[0].answer, 'done');
   assert.equal(await hub.detail('default/w9:p9'), null);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('finished agents get next steps from the model, merged after the rule buttons once they land', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-hub-'));
+  fs.mkdirSync(path.join(dir, 'sessions'));
+  fs.mkdirSync(path.join(dir, 'projects', '-x-proj'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'sessions', '7.json'), JSON.stringify({ sessionId: 's1', cwd: '/x/proj' }));
+  fs.writeFileSync(path.join(dir, 'projects', '-x-proj', 's1.jsonl'), [
+    { type: 'user', message: { content: 'go' } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done. Does it look right?' }] } },
+  ].map(e => JSON.stringify(e)).join('\n') + '\n');
+  const asked = [];
+  let land;
+  const nextSteps = {
+    get(key, ctx, onReady) {
+      asked.push({ key, ctx });
+      if (!land) { land = onReady; return null; }
+      return [{ label: 'Add tests', text: 'add tests' }];
+    },
+  };
+  const state = { 'd.sock': [raw('w1:p1', 'working')] };
+  const hub = new Hub({ sessions: () => sessions, rpc: fakeRpc(state), claudeDir: dir, nextSteps, vocab: { push: 'push it', deploy: 'deploy', deployByProject: {}, examples: ['yes'] } });
+  const events = [];
+  hub.on('change', e => events.push(e));
+  await hub.poll();
+  assert.equal(asked.length, 0, 'not while working');
+
+  state['d.sock'] = [raw('w1:p1', 'done')];
+  await hub.poll();
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].ctx.turn.answer, 'Done. Does it look right?');
+  assert.deepEqual(asked[0].ctx.existing.map(s => s.text), ['yes', 'no']);
+  assert.deepEqual(asked[0].ctx.vocab.examples, ['yes']);
+  assert.equal(asked[0].ctx.project, 'proj');
+  assert.deepEqual(hub.agents()[0].suggestions.map(s => s.label), ['Yes', 'No']);
+
+  land();
+  assert.deepEqual(hub.agents()[0].suggestions.map(s => s.label), ['Yes', 'No', 'Add tests']);
+  assert.deepEqual(events.at(-1).agent.suggestions.map(s => s.label), ['Yes', 'No', 'Add tests']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('summaries read as plain text, without markdown list markers', async () => {
+  const { summarize } = await import('../src/hub.js');
+  const t = { turns: [{ prompt: 'p', steps: [], answer: 'Intro.\n\n- This week: 15 hours.\n- Vidya has not approved.', files: {} }] };
+  assert.equal(summarize({ status: 'done' }, t, null).summary, 'This week: 15 hours. Vidya has not approved.');
 });

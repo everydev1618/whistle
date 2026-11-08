@@ -21,19 +21,20 @@
 <body>
   <main id="herd" class="view">
     <header class="herd-head">
-      <div class="t"><h1>Herd</h1><span class="count" id="count">Connecting…</span></div>
+      <div class="t"><h1>Agents</h1><span class="count" id="count">Connecting…</span></div>
       <div class="sessions" id="sessions" role="group" aria-label="herdr sessions"></div>
     </header>
     <div class="scroll" id="herd-scroll">
-      <section id="g-needs"><div class="grp"><span>Needs you</span></div><div class="cards" id="needs"></div></section>
-      <section id="g-working"><div class="grp"><span>Working</span></div><div class="cards" id="working"></div></section>
-      <section id="g-resting"><div class="grp"><span>Resting</span></div><div id="resting"></div></section>
+      <section id="g-asking" hidden><div class="grp"><span>Asking you</span></div><div class="cards" id="asking"></div></section>
+      <section id="g-finished"><div class="grp"><span>Finished</span></div><div class="cards" id="finished"></div></section>
+      <section id="g-working" hidden><div class="grp"><span>Working</span></div><div class="cards" id="working"></div></section>
+      <section id="g-earlier" hidden><div class="grp"><span>Earlier</span></div><div id="earlier"></div></section>
     </div>
   </main>
 
   <main id="session" class="view" hidden>
     <header class="nav">
-      <button class="back" id="back" aria-label="Back to Herd">‹ Herd</button>
+      <button class="back" id="back" aria-label="Back to agents">‹ Agents</button>
       <div class="ttl"><b id="s-title"></b><span id="s-sub"></span></div>
       <span class="pill" id="s-pill"></span>
     </header>

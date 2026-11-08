@@ -4,6 +4,8 @@ import { Hub } from './hub.js';
 import { findSessions } from './herdr.js';
 import { createServer } from './server.js';
 import { findClaudeDirs } from './claude.js';
+import { loadVocab } from './vocab.js';
+import { NextSteps, runClaude } from './nextsteps.js';
 
 const home = os.homedir();
 const herdrDir = process.env.HERDR_CONFIG_DIR || path.join(home, '.config', 'herdr');
@@ -12,9 +14,15 @@ const port = Number(process.env.PORT || 7717);
 const host = process.env.HOST || '127.0.0.1';
 const allowedUsers = (process.env.WHISTLE_ALLOWED_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
 
-const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir });
+// Next-step buttons from Haiku via the `claude` CLI. WHISTLE_NEXT_STEPS=off turns them off.
+const nextSteps = process.env.WHISTLE_NEXT_STEPS === 'off' ? null : new NextSteps({
+  run: prompt => runClaude(prompt, { bin: process.env.WHISTLE_CLAUDE_BIN || 'claude', configDir: process.env.WHISTLE_CLAUDE_CONFIG_DIR }),
+});
+
+const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: loadVocab(claudeDir), nextSteps });
+setInterval(() => { hub.vocab = loadVocab(claudeDir); }, 10 * 60 * 1000).unref();
 hub.start();
 
 createServer({ hub, allowedUsers }).listen(port, host, () => {
-  console.log(`whistle on http://${host}:${port}  herdr=${herdrDir}  claude=${claudeDir}  users=${allowedUsers.join(',') || 'any'}`);
+  console.log(`whistle on http://${host}:${port}  herdr=${herdrDir}  claude=${claudeDir}  users=${allowedUsers.join(',') || 'any'}  next-steps=${nextSteps ? 'on' : 'off'}`);
 });

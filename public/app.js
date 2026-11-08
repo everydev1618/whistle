@@ -73,7 +73,8 @@ function stop(id) {
 }
 
 // ---------- herd ----------
-const ORDER = { blocked: 0, done: 1 };
+const PILL = { blocked: 'Asking', done: 'Finished', idle: 'Finished', working: 'Working' };
+const RECENT_MS = 24 * 3600 * 1000;
 const when = a => (a.endedAt ? Date.parse(a.endedAt) : 0);
 
 function ago(iso) {
@@ -89,19 +90,28 @@ function visible() {
   return [...state.agents.values()].filter(a => state.filter === 'all' || a.session === state.filter);
 }
 
-function chipHtml(id, chips) {
-  return chips.map((c, i) => `<button class="chip${c.primary ? ' primary' : ''}" data-act="${esc(id)}" data-i="${i}">${esc(c.label)}${c.hint ? `<small>${esc(c.hint)}</small>` : ''}</button>`).join('');
+// `full` shows what a model button will actually send under its label.
+function chipHtml(id, chips, { full = false } = {}) {
+  return chips.map((c, i) => {
+    const hint = c.hint || (full && c.text && c.text.toLowerCase() !== c.label.toLowerCase() ? c.text : '');
+    return `<button class="chip${c.primary ? ' primary' : ''}${c.source === 'model' ? ' model' : ''}" data-act="${esc(id)}" data-i="${i}">${esc(c.label)}${hint ? `<small>${esc(hint)}</small>` : ''}</button>`;
+  }).join('');
 }
 
 function sessionTag(a) { return a.session !== 'default' ? `<span class="tag">${esc(a.session)}</span>` : ''; }
 
 function renderHerd() {
   const list = visible();
-  const needs = list.filter(a => a.status === 'blocked' || a.status === 'done').sort((x, y) => (ORDER[x.status] - ORDER[y.status]) || when(y) - when(x));
-  const working = list.filter(a => a.status === 'working').sort((x, y) => when(y) - when(x));
-  const resting = list.filter(a => !['blocked', 'done', 'working'].includes(a.status)).sort((x, y) => when(y) - when(x));
+  // Asking: stuck until you answer. Finished: ended a turn in the last day, your move.
+  // Earlier: everything quieter or older.
+  const byRecent = (x, y) => when(y) - when(x);
+  const recent = a => Date.now() - when(a) < RECENT_MS;
+  const asking = list.filter(a => a.status === 'blocked').sort(byRecent);
+  const finished = list.filter(a => (a.status === 'done' || a.status === 'idle') && recent(a)).sort(byRecent);
+  const working = list.filter(a => a.status === 'working').sort(byRecent);
+  const earlier = list.filter(a => !asking.includes(a) && !finished.includes(a) && !working.includes(a)).sort(byRecent);
 
-  $('#count').textContent = `${needs.length} need you · ${working.length} working`;
+  $('#count').textContent = [asking.length && `${asking.length} asking`, `${finished.length} finished`, `${working.length} working`].filter(Boolean).join(' · ');
 
   const counts = new Map();
   for (const a of state.agents.values()) counts.set(a.session, (counts.get(a.session) || 0) + 1);
@@ -110,19 +120,9 @@ function renderHerd() {
     return `<button data-filter="${esc(s.name)}" aria-pressed="${state.filter === s.name}" class="${s.running ? '' : 'down'}">${s.name === 'all' ? 'All' : esc(s.name)} · ${n}</button>`;
   }).join('');
 
-  $('#needs').innerHTML = needs.map(a => {
-    const sent = state.sent.has(a.id);
-    const body = a.question
-      ? `<p class="q">${esc(a.question.question)}</p>`
-      : a.summary ? `<p>${esc(a.summary)}</p>` : '';
-    const chips = sent ? '' : chipHtml(a.id, a.suggestions.slice(0, 3));
-    return `<article class="card${sent ? ' sent' : ''}" data-id="${esc(a.id)}">
-      ${a.suggestions[0] && !sent ? `<div class="swipehint">${esc(a.suggestions[0].label)} ›</div>` : ''}
-      <div class="meta"><span class="pill ${a.status}">${a.status === 'blocked' ? 'Asks' : 'Done'}</span>${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${sent ? 'sent' : ago(a.endedAt)}</span></div>
-      <button class="open" data-open="${esc(a.id)}"><h2>${esc(a.title)}</h2>${body}</button>
-      ${chips ? `<div class="chips">${chips}</div>` : ''}
-    </article>`;
-  }).join('') || '<p class="empty">Nothing needs you.</p>';
+  $('#g-asking').hidden = !asking.length;
+  $('#asking').innerHTML = asking.map(card).join('');
+  $('#finished').innerHTML = finished.map(card).join('') || '<p class="empty">Nothing finished in the last day.</p>';
 
   $('#working').innerHTML = working.map(a => `
     <article class="card" data-id="${esc(a.id)}">
@@ -131,15 +131,30 @@ function renderHerd() {
       ${a.live ? `<div class="live"><span>▸</span><span>${esc(a.live)}</span></div>` : ''}
       <div class="bar"><i></i></div>
       <div class="chips"><button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button></div>
-    </article>`).join('') || '<p class="empty">Nothing running.</p>';
+    </article>`).join('');
+  $('#g-working').hidden = !working.length;
 
-  $('#resting').innerHTML = resting.map(a => `<button class="rest" data-open="${esc(a.id)}"><span>${esc(a.title || a.project)}</span><span class="proj">${esc(a.project)} · ${ago(a.endedAt)}</span></button>`).join('') || '<p class="empty">No idle agents.</p>';
-  $('#g-resting').hidden = !resting.length;
+  $('#earlier').innerHTML = earlier.map(a => `<button class="rest" data-open="${esc(a.id)}"><span>${esc(a.title || a.project)}</span><span class="proj">${esc(a.project)} · ${ago(a.endedAt)}</span></button>`).join('');
+  $('#g-earlier').hidden = !earlier.length;
   bindSwipes();
 }
 
+function card(a) {
+  const sent = state.sent.has(a.id);
+  const body = a.question
+    ? `<p class="q">${esc(a.question.question)}</p>`
+    : a.summary ? `<p>${esc(a.summary)}</p>` : '';
+  const chips = sent ? '' : chipHtml(a.id, a.suggestions.slice(0, 3));
+  return `<article class="card${sent ? ' sent' : ''}" data-id="${esc(a.id)}">
+    ${a.suggestions[0] && !sent ? `<div class="swipehint">${esc(a.suggestions[0].label)} ›</div>` : ''}
+    <div class="meta"><span class="pill ${a.status}">${PILL[a.status] || a.status}</span>${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${sent ? 'sent' : ago(a.endedAt)}</span></div>
+    <button class="open" data-open="${esc(a.id)}"><h2>${esc(a.title)}</h2>${body}</button>
+    ${chips ? `<div class="chips">${chips}</div>` : ''}
+  </article>`;
+}
+
 function bindSwipes() {
-  for (const card of document.querySelectorAll('#needs .card')) {
+  for (const card of document.querySelectorAll('#asking .card, #finished .card')) {
     const id = card.dataset.id;
     const a = state.agents.get(id);
     const top = a?.suggestions?.[0];
@@ -225,7 +240,7 @@ function renderSession() {
   $('#s-sub').textContent = `${a.project} · ${a.session}/${a.paneId}`;
   const pill = $('#s-pill');
   pill.className = `pill ${a.status}`;
-  pill.textContent = { blocked: 'Asks', done: 'Done', working: 'Working', idle: 'Idle' }[a.status] || a.status;
+  pill.textContent = PILL[a.status] || a.status;
 
   const scroller = $('#s-scroll');
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
@@ -253,7 +268,7 @@ function renderSession() {
   $('#s-body').innerHTML = html;
 
   const chips = a.question ? [] : [...a.suggestions];
-  let dock = chipHtml(a.id, chips);
+  let dock = chipHtml(a.id, chips, { full: true });
   if (a.status === 'working') dock += `<button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button>`;
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
   $('#s-chips').innerHTML = dock;
@@ -315,7 +330,35 @@ function toast(msg) {
 }
 
 // ---------- events ----------
+// Long-press a reply button to put its text in the composer instead of sending it.
+let pressT = null, pressed = false, px = 0, py = 0;
+document.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - px, e.clientY - py) > 10) clearTimeout(pressT); });
+document.addEventListener('pointerdown', e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  pressed = false;
+  px = e.clientX; py = e.clientY;
+  clearTimeout(pressT);
+  pressT = setTimeout(() => {
+    const a = state.agents.get(el.dataset.act);
+    const chip = a?.suggestions?.[Number(el.dataset.i)];
+    if (!chip?.text) return;
+    pressed = true;
+    if (state.openId !== a.id) location.hash = `a=${encodeURIComponent(a.id)}`;
+    setTimeout(() => {
+      const d = $('#draft');
+      d.value = chip.text;
+      grow(d);
+      d.focus();
+      d.setSelectionRange(d.value.length, d.value.length);
+    }, 0);
+  }, 450);
+});
+for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, () => clearTimeout(pressT));
+document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]')) e.preventDefault(); });
+
 document.addEventListener('click', e => {
+  if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
   const el = e.target.closest('[data-act],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.act) {
