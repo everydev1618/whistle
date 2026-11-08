@@ -19,12 +19,13 @@ It runs as a LaunchAgent and is served on the tailnet at **https://your-mac.your
 (tailnet only, locked to `you@example.com`).
 
 ```sh
-cp deploy/ai.whistle.server.plist ~/Library/LaunchAgents/
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.whistle.server.plist
-launchctl kickstart -k gui/$(id -u)/ai.whistle.server   # restart after server changes
+npm run deploy               # test, lint, install/restart the LaunchAgent, wait until it answers
 tail -f ~/Library/Logs/whistle.log
-tailscale serve --bg 7717                                 # once; `tailscale serve --https=443 off` to undo
+tailscale serve --bg 7717    # once; `tailscale serve --https=443 off` to undo
 ```
+
+`npm run deploy` reinstalls the LaunchAgent when `deploy/ai.whistle.server.plist` changed and
+otherwise just restarts it. It stops before restarting if tests or lint fail.
 
 UI changes in `public/` need no restart, just a reload. On the iPhone: open the URL in Safari,
 Share → Add to Home Screen.
