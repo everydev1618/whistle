@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Whistle</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Whistle">
+<meta name="theme-color" content="#f7f9fb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b1117" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main id="herd" class="view">
+    <header class="herd-head">
+      <div class="t"><h1>Herd</h1><span class="count" id="count">Connecting…</span></div>
+      <div class="sessions" id="sessions" role="group" aria-label="herdr sessions"></div>
+    </header>
+    <div class="scroll" id="herd-scroll">
+      <section id="g-needs"><div class="grp"><span>Needs you</span></div><div class="cards" id="needs"></div></section>
+      <section id="g-working"><div class="grp"><span>Working</span></div><div class="cards" id="working"></div></section>
+      <section id="g-resting"><div class="grp"><span>Resting</span></div><div id="resting"></div></section>
+    </div>
+  </main>
+
+  <main id="session" class="view" hidden>
+    <header class="nav">
+      <button class="back" id="back" aria-label="Back to Herd">‹ Herd</button>
+      <div class="ttl"><b id="s-title"></b><span id="s-sub"></span></div>
+      <span class="pill" id="s-pill"></span>
+    </header>
+    <div class="scroll" id="s-scroll"><div id="s-body"></div></div>
+    <footer class="dock" id="dock">
+      <div class="row" id="s-chips"></div>
+      <form class="composer" id="composer">
+        <textarea id="draft" rows="1" placeholder="Say something…" enterkeyhint="send" autocomplete="off"></textarea>
+        <button class="ic send" id="send" aria-label="Send">↑</button>
+      </form>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

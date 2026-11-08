@@ -1,0 +1,38 @@
+                               _
+  _____   _____ _ __ _   _  __| | _____   __
+ / _ \ \ / / _ \ '__| | | |/ _` |/ _ \ \ / /
+|  __/\ V /  __/ |  | |_| | (_| |  __/\ V /
+ \___| \_/ \___|_|   \__, |\__,_|\___| \_/
+                     |___/
+ m2 [demo] ➜  demo-app claude
+ ▐▛███▛█   Claude Code v2.1.319
+▝▜██████▀  Opus 5.5 · Claude Team
+ ▝▝   ▝▝   ~/Code/demo-app
+
+▎ Auto mode is now Claude Code's default permission mode.
+▎ Auto mode lets Claude handle permission prompts automatically.
+▎ Claude checks each tool call for risky actions and prompt
+▎ injection before executing, runs the ones it assesses as
+▎ lower-risk, and blocks the rest.
+▎ https://code.claude.com/docs/en/permission-modes
+
+❯ This is a UI test. Call the AskUserQuestion tool exactly once
+  with one question: 'Which color?' header 'Color', options Red,
+  Green, Blue (each with a one-word description). Do nothing
+  else, no other tools.
+──────────────────────────────────────────────────────────────────
+ ☐ Color
+
+Which color?
+
+❯ 1. Red
+     Warm
+  2. Green
+     Natural
+  3. Blue
+     Cool
+  4. Type something.
+──────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
