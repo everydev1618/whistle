@@ -28,7 +28,7 @@ class FakeHub extends EventEmitter {
 let hub, server, base;
 before(async () => {
   hub = new FakeHub();
-  server = createServer({ hub, allowedUsers: [] });
+  server = createServer({ hub, allowedUsers: [], log: () => {} });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -138,4 +138,22 @@ test('the event stream and agent list carry the app version', async () => {
   ctrl.abort();
   const data = JSON.parse(text.split('\n').find(l => l.startsWith('data: ')).slice(6));
   assert.match(data.version, /^[0-9a-f]{12}$/);
+});
+
+test('every prompt, key press and queued message is logged with the agent and who sent it', async () => {
+  const lines = [];
+  const s = createServer({ hub, allowedUsers: [], log: l => lines.push(l) });
+  await new Promise(r => s.listen(0, '127.0.0.1', r));
+  const b = `http://127.0.0.1:${s.address().port}/api/agents/` + encodeURIComponent('default/w1:p1');
+  const h = { 'content-type': 'application/json', 'tailscale-user-login': 'me@x.com' };
+  try {
+    await fetch(b + '/prompt', { method: 'POST', headers: h, body: JSON.stringify({ text: '/clear' }) });
+    await fetch(b + '/keys', { method: 'POST', headers: h, body: JSON.stringify({ keys: ['esc'] }) });
+    await fetch(b + '/queue', { method: 'POST', headers: h, body: JSON.stringify({ text: 'push it' }) });
+  } finally { s.close(); }
+  assert.deepEqual(lines, [
+    'me@x.com → default/w1:p1 prompt "/clear"',
+    'me@x.com → default/w1:p1 keys esc',
+    'me@x.com → default/w1:p1 queue "push it"',
+  ]);
 });

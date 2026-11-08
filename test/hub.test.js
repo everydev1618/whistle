@@ -208,3 +208,22 @@ test('queued messages wait while the agent asks a question, can be cancelled, an
   assert.deepEqual(hub.agents()[0].queue, []);
   assert.throws(() => hub.enqueue('nope/w9:p9', 'x'), e => e.code === 'not_found');
 });
+
+test('picks up a new transcript after /clear even when the status does not change', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-hub-'));
+  fs.mkdirSync(path.join(dir, 'sessions'));
+  fs.mkdirSync(path.join(dir, 'projects', '-x-proj'), { recursive: true });
+  const session = id => fs.writeFileSync(path.join(dir, 'sessions', '7.json'), JSON.stringify({ sessionId: id, cwd: '/x/proj' }));
+  const transcript = (id, entries) => fs.writeFileSync(path.join(dir, 'projects', '-x-proj', `${id}.jsonl`), entries.map(e => JSON.stringify(e)).join('\n') + '\n');
+  session('s1');
+  transcript('s1', [{ type: 'user', message: { content: 'old work' } }, { type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }]);
+  const state = { 'd.sock': [raw('w1:p1', 'idle')] };
+  const hub = new Hub({ sessions: () => sessions, rpc: fakeRpc(state), claudeDir: dir, recheckMs: 0 });
+  await hub.poll();
+  assert.equal(hub.agents()[0].lastPrompt, 'old work');
+  session('s2');
+  transcript('s2', [{ type: 'user', message: { content: '<command-name>/clear</command-name>' } }]);
+  await hub.poll();
+  assert.equal(hub.agents()[0].lastPrompt, null);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

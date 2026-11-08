@@ -53,8 +53,9 @@ export class Hub extends EventEmitter {
 
   #handoff = new Map(); // id -> { sentAt, sawWorking } after sending a queued message
 
-  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null }) {
+  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null, recheckMs = 10_000 }) {
     super();
+    this.recheckMs = recheckMs;
     this.queue = queue;
     this.vocab = vocab;
     this.nextSteps = nextSteps;
@@ -138,11 +139,13 @@ export class Hub extends EventEmitter {
   async #enrich(agent, statusMoved) {
     const socket = this.#socketFor(agent);
     let tx = this.#tx.get(agent.id);
-    if (!tx || statusMoved) {
-      // The pane may now host a different Claude session (e.g. after /clear).
+    if (!tx || statusMoved || Date.now() - tx.checkedAt >= this.recheckMs) {
+      // The pane may now host a different Claude session (e.g. after /clear, which
+      // doesn't always change the status), so look again every so often.
       const info = await this.rpc(socket, 'pane.process_info', { pane_id: agent.paneId });
       const found = findTranscript({ processInfo: info.process_info, claudeDir: this.claudeDir });
       if (!tx || tx.path !== found?.path) tx = { path: found?.path ?? null, mtimeMs: -1, transcript: null };
+      tx.checkedAt = Date.now();
       this.#tx.set(agent.id, tx);
     }
     if (tx.path) {

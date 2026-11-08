@@ -14,7 +14,6 @@ const state = {
   showAllTurns: false,
   sent: new Set(),     // agents we just sent to, shown dimmed until herdr reports work
   stopArmed: null,
-  clearArmed: null,
   marks: {},          // { agentId: { seen, done } } per turn, saved on the server
 };
 
@@ -153,23 +152,41 @@ function stop(id) {
   render();
 }
 
-// /clear throws the conversation away, so it takes a second tap.
-async function clearSession(id) {
-  if (state.clearArmed !== id) {
-    state.clearArmed = id;
-    toast('Tap again to clear the conversation and start fresh');
-    setTimeout(() => { if (state.clearArmed === id) { state.clearArmed = null; render(); } }, 3000);
-    return render();
-  }
-  state.clearArmed = null;
-  try {
-    await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text: '/clear' });
-    toast('Started a fresh session');
-    refreshDetailSoon();
-  } catch (e) {
-    toast(e.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not cleared: ${e.message}`);
-  }
-  render();
+// /clear throws the conversation away, so it asks first.
+function clearSession(id) {
+  const a = state.agents.get(id);
+  confirmSheet({
+    title: 'Start a new session?',
+    body: `Clears the conversation in ${a?.project || 'this agent'} (/clear). The agent keeps running in the same pane.`,
+    label: 'Clear and start fresh',
+    run: async () => {
+      try {
+        await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text: '/clear' });
+        toast('Started a fresh session');
+        // Claude takes a moment to switch transcripts; look a few times.
+        for (const ms of [500, 1500, 3000, 6000]) setTimeout(() => { if (state.openId === id) loadDetail(); }, ms);
+      } catch (e) {
+        toast(e.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not cleared: ${e.message}`);
+      }
+    },
+  });
+}
+
+function confirmSheet({ title, body, label, run }) {
+  closeSheet();
+  const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
+  const sheet = Object.assign(document.createElement('div'), { className: 'sheet confirm' });
+  sheet.innerHTML = `<b class="ct">${esc(title)}</b><p>${esc(body)}</p>
+    <button class="danger" data-ok>${esc(label)}</button>
+    <button data-cancel>Cancel</button>`;
+  scrim.onclick = closeSheet;
+  sheet.onclick = e => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    closeSheet();
+    if (b.dataset.ok !== undefined) run();
+  };
+  document.body.append(scrim, sheet);
 }
 
 // ---------- herd ----------
@@ -388,7 +405,7 @@ function renderSession() {
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
   if (a.status === 'done' || a.status === 'idle') {
     dock += doneChip(a.id);
-    dock += `<button class="chip ${state.clearArmed === a.id ? 'warn' : 'ghost'}" data-clear="${esc(a.id)}">${state.clearArmed === a.id ? 'Tap to clear' : 'New session'}</button>`;
+    dock += `<button class="chip ghost" data-clear="${esc(a.id)}">New session</button>`;
   }
   $('#s-queue').innerHTML = (a.queue || []).map((q, i) => `<div class="qitem"><span class="qlabel">${i ? 'Then' : 'Next'}</span><span class="qtext">${esc(q.text)}</span><button class="qx" data-unqueue="${esc(q.id)}" aria-label="Cancel queued message">✕</button></div>`).join('');
   // While it works, the composer queues instead of interrupting the turn.

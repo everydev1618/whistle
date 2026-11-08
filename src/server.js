@@ -43,7 +43,7 @@ async function readJson(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
 }
 
-export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, version = appVersion() }) {
+export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, version = appVersion(), log = console.log }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -75,6 +75,8 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
 
       if (parts[1] === 'agents' && parts[2]) {
         const id = decodeURIComponent(parts[2]);
+        const who = req.headers['tailscale-user-login'] || 'local';
+        const said = t => JSON.stringify(t.length > 80 ? t.slice(0, 79) + '…' : t);
         if (req.method === 'GET' && parts.length === 3) {
           const d = await hub.detail(id);
           return d ? send(res, 200, d) : fail(res, 404, 'not_found', `No agent ${id}`);
@@ -83,12 +85,15 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
           const { text } = await readJson(req);
           if (typeof text !== 'string' || !text.trim()) return fail(res, 400, 'empty_prompt', 'Prompt text is empty.');
           await hub.prompt(id, text);
+          log(`${who} → ${id} prompt ${said(text)}`);
           return send(res, 202, { ok: true });
         }
         if (req.method === 'POST' && parts[3] === 'queue' && parts.length === 4) {
           const { text } = await readJson(req);
           if (typeof text !== 'string') return fail(res, 400, 'bad_queue', 'text must be a string.');
-          return send(res, 201, hub.enqueue(id, text));
+          const item = hub.enqueue(id, text);
+          log(`${who} → ${id} queue ${said(text)}`);
+          return send(res, 201, item);
         }
         if (req.method === 'DELETE' && parts[3] === 'queue' && parts.length === 5) {
           return hub.unqueue(id, decodeURIComponent(parts[4])) ? send(res, 200, { ok: true }) : fail(res, 404, 'not_found', 'No such queued message.');
@@ -97,6 +102,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
           const { keys } = await readJson(req);
           if (!Array.isArray(keys) || !keys.length || !keys.every(k => typeof k === 'string')) return fail(res, 400, 'bad_keys', 'keys must be a list of key names.');
           await hub.keys(id, keys);
+          log(`${who} → ${id} keys ${keys.join(' ')}`);
           return send(res, 202, { ok: true });
         }
       }

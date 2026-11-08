@@ -146,6 +146,10 @@ code { font-family: var(--f-mono); font-size: .86em }
 .sheet q { font-size: 13px; color: var(--muted); border-left: 3px solid var(--accent); padding-left: 10px; quotes: none; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden }
 .sheet button { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 11px 12px; text-align: left; font-weight: 600 }
 .sheet button small { display: block; color: var(--muted); font-weight: 400; font-size: 12px }
+.sheet.confirm .ct { font-size: 17px }
+.sheet.confirm p { margin: 0 0 6px; color: var(--muted); font-size: 14px }
+.sheet.confirm button { text-align: center }
+.sheet button.danger { background: var(--blocked); border-color: var(--blocked); color: #fff }
 .scrim { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 19 }
 .toast { position: fixed; left: 50%; bottom: calc(110px + var(--bottom)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; z-index: 30; max-width: 90vw; white-space: nowrap; display: flex; align-items: center; gap: 12px }
 .toast span { overflow: hidden; text-overflow: ellipsis }
