@@ -157,3 +157,18 @@ test('every prompt, key press and queued message is logged with the agent and wh
     'me@x.com → default/w1:p1 queue "push it"',
   ]);
 });
+
+test('POST /api/uploads saves an image and returns its path on this Mac', async () => {
+  const saved = [];
+  const uploads = { save: (buf, type) => { if (type === 'image/heic') throw new HerdrError('bad_image', 'no heic'); saved.push([buf.toString(), type]); return '/state/uploads/s.png'; } };
+  const s = createServer({ hub, allowedUsers: [], uploads, log: () => {} });
+  await new Promise(r => s.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${s.address().port}/api/uploads`;
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'image/png' }, body: 'img' });
+    assert.equal(r.status, 201);
+    assert.deepEqual(await r.json(), { path: '/state/uploads/s.png' });
+    assert.deepEqual(saved, [['img', 'image/png']]);
+    assert.equal((await fetch(url, { method: 'POST', headers: { 'content-type': 'image/heic' }, body: 'x' })).status, 400);
+  } finally { s.close(); }
+});

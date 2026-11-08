@@ -41,7 +41,7 @@ Share → Add to Home Screen.
 | `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
 | `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
-| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), queued messages (`queue.json`), cached Haiku suggestions (`nextsteps.json`) |
+| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), queued messages (`queue.json`), cached Haiku suggestions (`nextsteps.json`), screenshots from the phone (`uploads/`, cleared after a week) |
 | `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
@@ -65,6 +65,7 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
 | `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
 | `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
+| `POST /api/uploads` | raw image body (`content-type: image/png\|jpeg\|gif\|webp`, ≤25 MB) → `{ "path" }` on this Mac. The app adds `[Image: <path>]` lines to the prompt so the agent reads it |
 | `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed) |
 | `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
 | `GET` / `PUT /api/prefs` | the caller's settings, e.g. `{ "filter": "Work" }`, keyed by Tailscale login |

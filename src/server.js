@@ -32,18 +32,23 @@ export function appVersion(dir = PUBLIC) {
   return hash.digest('hex').slice(0, 12);
 }
 
-async function readJson(req) {
+async function readBody(req, limit) {
   let size = 0;
   const chunks = [];
   for await (const c of req) {
     size += c.length;
-    if (size > 64 * 1024) throw new HerdrError('too_large', 'request body too large');
+    if (size > limit) throw new HerdrError('too_large', 'request body too large');
     chunks.push(c);
   }
-  try { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
+  return Buffer.concat(chunks);
 }
 
-export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, version = appVersion(), log = console.log }) {
+async function readJson(req) {
+  const body = await readBody(req, 64 * 1024);
+  try { return JSON.parse(body.toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
+}
+
+export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, uploads = null, version = appVersion(), log = console.log }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -62,6 +67,12 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
         const user = req.headers['tailscale-user-login'] || '';
         if (req.method === 'GET') return send(res, 200, prefs.get(user));
         if (req.method === 'PUT') return send(res, 200, prefs.set(user, await readJson(req)));
+      }
+
+      if (req.method === 'POST' && parts[1] === 'uploads' && parts.length === 2 && uploads) {
+        const file = uploads.save(await readBody(req, 25 * 1024 * 1024), req.headers['content-type']);
+        log(`${req.headers['tailscale-user-login'] || 'local'} uploaded ${path.basename(file)}`);
+        return send(res, 201, { path: file });
       }
 
       if (parts[1] === 'marks' && parts.length === 2 && marks) {
@@ -109,7 +120,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       return fail(res, 404, 'not_found', 'No such endpoint.');
     } catch (e) {
       if (e instanceof HerdrError) {
-        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue'].includes(e.code) ? 400 : 502);
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image'].includes(e.code) ? 400 : 502);
         return fail(res, code, e.code, e.message);
       }
       console.error(e);

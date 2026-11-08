@@ -1,5 +1,6 @@
 import { mdBlocks } from './md.js';
 import { groupAgents, isSeen, turnKey } from './herd.js';
+import { withImages } from './attach.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -105,7 +106,7 @@ function updateReady() {
   if (safeToReload()) location.reload();
   else toast('Whistle was updated', { label: 'Reload', run: () => location.reload() }, 60_000);
 }
-const safeToReload = () => !$('#draft').value.trim() && document.activeElement?.id !== 'draft' && !document.querySelector('.sheet:not([hidden])');
+const safeToReload = () => !$('#draft').value.trim() && !attached.length && document.activeElement?.id !== 'draft' && !document.querySelector('.sheet:not([hidden])');
 
 // The home-screen app has no browser pull-to-refresh, so do it here.
 function pullToRefresh(scroller) {
@@ -535,16 +536,79 @@ window.addEventListener('hashchange', route);
 const draft = $('#draft');
 draft.addEventListener('input', () => grow(draft));
 draft.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); $('#composer').requestSubmit(); } });
+// ---------- screenshots ----------
+// Picked or pasted images wait as thumbnails above the composer and go up when you send.
+let attached = []; // [{ blob, url }]
+const READABLE = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+
+// iPhone photos can be HEIC, which the agent can't read; redraw anything else as JPEG.
+async function readable(file) {
+  if (READABLE.includes(file.type)) return file;
+  const bmp = await createImageBitmap(file);
+  const c = Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
+  c.getContext('2d').drawImage(bmp, 0, 0);
+  return new Promise((res, rej) => c.toBlob(b => (b ? res(b) : rej(new Error('could not convert image'))), 'image/jpeg', 0.9));
+}
+
+async function attach(files) {
+  for (const f of files) {
+    if (!f.type.startsWith('image/')) continue;
+    try {
+      const blob = await readable(f);
+      attached.push({ blob, url: URL.createObjectURL(blob) });
+    } catch { toast(`Couldn't read ${f.name || 'that image'}.`); }
+  }
+  renderAttached();
+}
+
+function renderAttached(sending = false) {
+  $('#s-attached').innerHTML = attached.map((a, i) => `<div class="thumb${sending ? ' sending' : ''}"><img src="${a.url}" alt="Screenshot ${i + 1}">${sending ? '' : `<button type="button" class="tx" data-detach="${i}" aria-label="Remove screenshot ${i + 1}">✕</button>`}</div>`).join('');
+}
+
+function clearAttached() {
+  attached.forEach(a => URL.revokeObjectURL(a.url));
+  attached = [];
+  renderAttached();
+}
+
+async function upload(blob) {
+  const r = await fetch('/api/uploads', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error?.message || `HTTP ${r.status}`);
+  return data.path;
+}
+
+$('#attach').onclick = () => $('#files').click();
+$('#files').addEventListener('change', e => { attach([...e.target.files]); e.target.value = ''; });
+$('#s-attached').addEventListener('click', e => {
+  const b = e.target.closest('[data-detach]');
+  if (!b) return;
+  const [gone] = attached.splice(Number(b.dataset.detach), 1);
+  URL.revokeObjectURL(gone.url);
+  renderAttached();
+});
+draft.addEventListener('paste', e => {
+  const imgs = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!imgs.length) return;
+  e.preventDefault();
+  attach(imgs);
+});
+
 $('#composer').addEventListener('submit', async e => {
   e.preventDefault();
-  const text = draft.value.trim();
-  if (!text || !state.openId) return;
+  const typed = draft.value.trim();
+  if ((!typed && !attached.length) || !state.openId) return;
   const before = draft.value;
   draft.value = '';
   grow(draft);
   const id = state.openId;
   const queuing = state.agents.get(id)?.status === 'working';
   try {
+    let text = typed;
+    if (attached.length) {
+      renderAttached(true);
+      text = withImages(typed, await Promise.all(attached.map(a => upload(a.blob))));
+    }
     if (queuing) {
       await api(`/api/agents/${encodeURIComponent(id)}/queue`, { text });
       toast('Queued. It sends when this turn finishes.');
@@ -553,9 +617,11 @@ $('#composer').addEventListener('submit', async e => {
       state.sent.add(id);
       toast('Sent');
     }
+    clearAttached();
   } catch (err) {
     draft.value = before;
     grow(draft);
+    renderAttached();
     toast(err.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not sent: ${err.message}`);
   }
 });
