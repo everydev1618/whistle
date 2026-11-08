@@ -24,6 +24,10 @@ tail -f ~/Library/Logs/whistle.log
 tailscale serve --bg 7717    # once; `tailscale serve --https=443 off` to undo
 ```
 
+The phone picks up a deploy by itself: the event stream reconnects with a new app version
+(a fingerprint of `public/`), and the app reloads, or offers a Reload button if you're typing.
+Pull down on either screen to reload by hand; the home-screen app has no browser controls.
+
 `npm run deploy` reinstalls the LaunchAgent when `deploy/ai.whistle.server.plist` changed and
 otherwise just restarts it. It stops before restarting if tests or lint fail.
 

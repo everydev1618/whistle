@@ -4,6 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { HerdrError } from './herdr.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -16,6 +17,21 @@ const send = (res, code, body) => {
 };
 const fail = (res, code, errCode, message) => send(res, code, { error: { code: errCode, message } });
 
+// A fingerprint of every file in the app folder. The phone compares it across
+// reconnects and reloads itself when a deploy changed the app.
+export function appVersion(dir = PUBLIC) {
+  const hash = crypto.createHash('sha1');
+  const walk = d => {
+    for (const name of fs.readdirSync(d).sort()) {
+      const p = path.join(d, name);
+      if (fs.statSync(p).isDirectory()) walk(p);
+      else hash.update(path.relative(dir, p)).update('\0').update(fs.readFileSync(p)).update('\0');
+    }
+  };
+  walk(dir);
+  return hash.digest('hex').slice(0, 12);
+}
+
 async function readJson(req) {
   let size = 0;
   const chunks = [];
@@ -27,7 +43,7 @@ async function readJson(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
 }
 
-export function createServer({ hub, allowedUsers = [], prefs = null, marks = null }) {
+export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, version = appVersion() }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -38,9 +54,9 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       if (parts[0] !== 'api') return serveStatic(url.pathname, res);
 
       if (req.method === 'GET' && parts[1] === 'agents' && parts.length === 2) {
-        return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [] });
+        return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [], version });
       }
-      if (req.method === 'GET' && parts[1] === 'events' && parts.length === 2) return events(req, res, hub);
+      if (req.method === 'GET' && parts[1] === 'events' && parts.length === 2) return events(req, res, hub, version);
 
       if (parts[1] === 'prefs' && parts.length === 2 && prefs) {
         const user = req.headers['tailscale-user-login'] || '';
@@ -96,10 +112,10 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
   });
 }
 
-function events(req, res, hub) {
+function events(req, res, hub, version) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
   const write = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  write('snapshot', { agents: hub.agents(), sessions: hub.sessions?.() ?? [] });
+  write('snapshot', { agents: hub.agents(), sessions: hub.sessions?.() ?? [], version });
   const onChange = ev => write('change', ev);
   hub.on('change', onChange);
   const ping = setInterval(() => res.write(': ping\n\n'), 25_000);

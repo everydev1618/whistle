@@ -71,10 +71,14 @@ async function api(path, body) {
   return data;
 }
 
+let es = null;
 function connect() {
-  const es = new EventSource('/api/events');
+  es?.close();
+  es = new EventSource('/api/events');
   es.addEventListener('snapshot', e => {
     const d = JSON.parse(e.data);
+    if (!state.version) state.version = d.version;
+    else if (d.version && d.version !== state.version) updateReady();
     state.agents = new Map(d.agents.map(a => [a.id, a]));
     state.sessions = d.sessions;
     render();
@@ -90,6 +94,37 @@ function connect() {
     if (state.openId && (ev.agent?.id === state.openId || ev.id === state.openId)) refreshDetailSoon();
   });
   es.onerror = () => { $('#count').textContent = 'Reconnecting…'; };
+}
+
+// ---------- updates ----------
+// A deploy restarts the server; the stream reconnects with a new app version.
+// Reload right away unless you're mid-reply, then offer it instead.
+let updatePending = false;
+function updateReady() {
+  updatePending = true;
+  if (safeToReload()) location.reload();
+  else toast('Whistle was updated', { label: 'Reload', run: () => location.reload() }, 60_000);
+}
+const safeToReload = () => !$('#draft').value.trim() && document.activeElement?.id !== 'draft' && !document.querySelector('.sheet:not([hidden])');
+
+// The home-screen app has no browser pull-to-refresh, so do it here.
+function pullToRefresh(scroller) {
+  const ptr = $('#ptr');
+  let y0 = null, dy = 0;
+  scroller.addEventListener('touchstart', e => { y0 = scroller.scrollTop <= 0 ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+  scroller.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    dy = Math.max(0, (e.touches[0].clientY - y0) * 0.5);
+    if (scroller.scrollTop > 0) { y0 = null; dy = 0; }
+    ptr.hidden = dy < 8;
+    ptr.style.transform = `translate(-50%, ${Math.min(dy, 90)}px)`;
+    ptr.textContent = dy > 70 ? 'Release to refresh' : 'Pull to refresh';
+  }, { passive: true });
+  scroller.addEventListener('touchend', () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (dy > 70) { ptr.textContent = 'Refreshing…'; location.reload(); } else ptr.hidden = true;
+  });
 }
 
 // ---------- actions ----------
@@ -388,13 +423,15 @@ function route() {
 function render() { if (state.openId) renderSession(); else renderHerd(); }
 
 let toastT;
-function toast(msg, action) {
+function toast(msg, action, ms) {
   const t = $('#toast');
   t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button>${esc(action.label)}</button>` : ''}`;
   if (action) $('button', t).onclick = () => { t.hidden = true; action.run(); };
+  // Sit just above the reply bar in the session view, so it doesn't cover the queue.
+  t.style.bottom = state.openId ? `${$('#dock').offsetHeight + 10}px` : '';
   t.hidden = false;
   clearTimeout(toastT);
-  toastT = setTimeout(() => { t.hidden = true; }, action ? 5000 : 2600);
+  toastT = setTimeout(() => { t.hidden = true; }, ms ?? (action ? 5000 : 2600));
 }
 
 // ---------- events ----------
@@ -487,4 +524,12 @@ connect();
 route();
 loadPrefs();
 loadMarks();
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { loadPrefs(); loadMarks(); } });
+pullToRefresh($('#herd-scroll'));
+pullToRefresh($('#s-scroll'));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (updatePending && safeToReload()) return location.reload();
+  if (es?.readyState === EventSource.CLOSED) connect(); // iOS can kill the stream while suspended
+  loadPrefs();
+  loadMarks();
+});

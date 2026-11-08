@@ -151,4 +151,6 @@ code { font-family: var(--f-mono); font-size: .86em }
 .toast span { overflow: hidden; text-overflow: ellipsis }
 .toast button { all: unset; cursor: pointer; color: var(--accent-soft, #9db0ff); font-weight: 700; padding: 2px 0 }
 .toast[hidden] { display: none }
+.ptr { position: fixed; top: calc(var(--top, 0px) + 8px); left: 50%; transform: translate(-50%, 0); background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px; z-index: 40; pointer-events: none }
+.ptr[hidden] { display: none }
 @media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run { animation: none } .card { transition: none } }

@@ -110,3 +110,32 @@ test('app files tell browsers to check for a newer version every time', async ()
   assert.equal(r.status, 200);
   assert.equal(r.headers.get('cache-control'), 'no-cache');
 });
+
+test('the app version is a fingerprint of the app files, and changes when one changes', async () => {
+  const fs = await import('node:fs');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { appVersion } = await import('../src/server.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-ver-'));
+  fs.mkdirSync(path.join(dir, 'sub'));
+  fs.writeFileSync(path.join(dir, 'app.js'), 'one');
+  fs.writeFileSync(path.join(dir, 'sub', 'x.css'), 'a');
+  const v1 = appVersion(dir);
+  assert.match(v1, /^[0-9a-f]{12}$/);
+  assert.equal(appVersion(dir), v1);
+  fs.writeFileSync(path.join(dir, 'sub', 'x.css'), 'b');
+  assert.notEqual(appVersion(dir), v1);
+});
+
+test('the event stream and agent list carry the app version', async () => {
+  const r = await fetch(base + '/api/agents');
+  assert.match((await r.json()).version, /^[0-9a-f]{12}$/);
+  const ctrl = new AbortController();
+  const res = await fetch(base + '/api/events', { signal: ctrl.signal });
+  const reader = res.body.getReader();
+  let text = '';
+  while (!text.includes('\n\n')) text += new TextDecoder().decode((await reader.read()).value);
+  ctrl.abort();
+  const data = JSON.parse(text.split('\n').find(l => l.startsWith('data: ')).slice(6));
+  assert.match(data.version, /^[0-9a-f]{12}$/);
+});
