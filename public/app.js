@@ -14,6 +14,7 @@ const state = {
   showAllTurns: false,
   sent: new Set(),     // agents we just sent to, shown dimmed until herdr reports work
   stopArmed: null,
+  clearArmed: null,
   marks: {},          // { agentId: { seen, done } } per turn, saved on the server
 };
 
@@ -149,6 +150,25 @@ function stop(id) {
   state.stopArmed = id;
   toast('Tap Stop again to interrupt');
   setTimeout(() => { if (state.stopArmed === id) { state.stopArmed = null; render(); } }, 3000);
+  render();
+}
+
+// /clear throws the conversation away, so it takes a second tap.
+async function clearSession(id) {
+  if (state.clearArmed !== id) {
+    state.clearArmed = id;
+    toast('Tap again to clear the conversation and start fresh');
+    setTimeout(() => { if (state.clearArmed === id) { state.clearArmed = null; render(); } }, 3000);
+    return render();
+  }
+  state.clearArmed = null;
+  try {
+    await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text: '/clear' });
+    toast('Started a fresh session');
+    refreshDetailSoon();
+  } catch (e) {
+    toast(e.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not cleared: ${e.message}`);
+  }
   render();
 }
 
@@ -366,7 +386,10 @@ function renderSession() {
   let dock = chipHtml(a.id, chips, { full: true });
   if (a.status === 'working') dock += `<button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button>`;
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
-  if (a.status === 'done' || a.status === 'idle') dock += doneChip(a.id);
+  if (a.status === 'done' || a.status === 'idle') {
+    dock += doneChip(a.id);
+    dock += `<button class="chip ${state.clearArmed === a.id ? 'warn' : 'ghost'}" data-clear="${esc(a.id)}">${state.clearArmed === a.id ? 'Tap to clear' : 'New session'}</button>`;
+  }
   $('#s-queue').innerHTML = (a.queue || []).map((q, i) => `<div class="qitem"><span class="qlabel">${i ? 'Then' : 'Next'}</span><span class="qtext">${esc(q.text)}</span><button class="qx" data-unqueue="${esc(q.id)}" aria-label="Cancel queued message">✕</button></div>`).join('');
   // While it works, the composer queues instead of interrupting the turn.
   const queuing = a.status === 'working';
@@ -464,7 +487,7 @@ document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]
 
 document.addEventListener('click', e => {
   if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
-  const el = e.target.closest('[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
+  const el = e.target.closest('[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.act) {
     const a = state.agents.get(el.dataset.act);
@@ -478,6 +501,7 @@ document.addEventListener('click', e => {
   else if (el.dataset.open) location.hash = `a=${encodeURIComponent(el.dataset.open)}`;
   else if (el.dataset.filter) setFilter(el.dataset.filter);
   else if (el.dataset.stop) stop(el.dataset.stop);
+  else if (el.dataset.clear) clearSession(el.dataset.clear);
   else if (el.dataset.esc) act(el.dataset.esc, { keys: ['esc'], label: 'Esc' });
   else if (el.dataset.key) act(state.openId, { keys: [el.dataset.key], label: el.querySelector('b')?.textContent });
   else if (el.dataset.strip !== undefined) {
