@@ -69,6 +69,14 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
           await hub.prompt(id, text);
           return send(res, 202, { ok: true });
         }
+        if (req.method === 'POST' && parts[3] === 'queue' && parts.length === 4) {
+          const { text } = await readJson(req);
+          if (typeof text !== 'string') return fail(res, 400, 'bad_queue', 'text must be a string.');
+          return send(res, 201, hub.enqueue(id, text));
+        }
+        if (req.method === 'DELETE' && parts[3] === 'queue' && parts.length === 5) {
+          return hub.unqueue(id, decodeURIComponent(parts[4])) ? send(res, 200, { ok: true }) : fail(res, 404, 'not_found', 'No such queued message.');
+        }
         if (req.method === 'POST' && parts[3] === 'keys') {
           const { keys } = await readJson(req);
           if (!Array.isArray(keys) || !keys.length || !keys.every(k => typeof k === 'string')) return fail(res, 400, 'bad_keys', 'keys must be a list of key names.');
@@ -79,7 +87,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       return fail(res, 404, 'not_found', 'No such endpoint.');
     } catch (e) {
       if (e instanceof HerdrError) {
-        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json'].includes(e.code) ? 400 : 502);
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue'].includes(e.code) ? 400 : 502);
         return fail(res, code, e.code, e.message);
       }
       console.error(e);
@@ -104,7 +112,7 @@ function serveStatic(pathname, res) {
   if (!file.startsWith(PUBLIC + path.sep)) return fail(res, 404, 'not_found', 'Not found.');
   fs.readFile(file, (err, data) => {
     if (err) return fail(res, 404, 'not_found', 'Not found.');
-    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, { 'content-type': TYPES[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
     res.end(data);
   });
 }

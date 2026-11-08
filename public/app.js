@@ -173,6 +173,7 @@ function renderHerd() {
       <div class="meta"><span class="pill working">Working</span>${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${a.steps ? `${a.steps} steps` : ''}</span></div>
       <button class="open" data-open="${esc(a.id)}"><h2>${esc(a.title)}</h2></button>
       ${a.live ? `<div class="live"><span>▸</span><span>${esc(a.live)}</span></div>` : ''}
+      ${a.queue?.length ? `<div class="next"><span>Next</span><span>${esc(a.queue[0].text)}</span>${a.queue.length > 1 ? `<span>+${a.queue.length - 1}</span>` : ''}</div>` : ''}
       <div class="bar"><i></i></div>
       <div class="chips"><button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button></div>
     </article>`).join('');
@@ -331,6 +332,12 @@ function renderSession() {
   if (a.status === 'working') dock += `<button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button>`;
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
   if (a.status === 'done' || a.status === 'idle') dock += doneChip(a.id);
+  $('#s-queue').innerHTML = (a.queue || []).map((q, i) => `<div class="qitem"><span class="qlabel">${i ? 'Then' : 'Next'}</span><span class="qtext">${esc(q.text)}</span><button class="qx" data-unqueue="${esc(q.id)}" aria-label="Cancel queued message">✕</button></div>`).join('');
+  // While it works, the composer queues instead of interrupting the turn.
+  const queuing = a.status === 'working';
+  $('#draft').placeholder = queuing ? 'Queue a message for when it finishes…' : 'Say something…';
+  $('#send').textContent = queuing ? '⇥' : '↑';
+  $('#send').setAttribute('aria-label', queuing ? 'Queue' : 'Send');
   $('#s-chips').innerHTML = dock;
   if (nearBottom || !scroller.dataset.seen) { scroller.scrollTop = scroller.scrollHeight; scroller.dataset.seen = '1'; }
 }
@@ -420,13 +427,17 @@ document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]
 
 document.addEventListener('click', e => {
   if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
-  const el = e.target.closest('[data-act],[data-done],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
+  const el = e.target.closest('[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.act) {
     const a = state.agents.get(el.dataset.act);
     const chip = a?.suggestions?.[Number(el.dataset.i)];
     if (chip) act(a.id, chip);
   } else if (el.dataset.done) markDone(el.dataset.done);
+  else if (el.dataset.unqueue) {
+    fetch(`/api/agents/${encodeURIComponent(state.openId)}/queue/${encodeURIComponent(el.dataset.unqueue)}`, { method: 'DELETE' })
+      .then(r => toast(r.ok ? 'Removed from the queue' : 'Already sent'));
+  }
   else if (el.dataset.open) location.hash = `a=${encodeURIComponent(el.dataset.open)}`;
   else if (el.dataset.filter) setFilter(el.dataset.filter);
   else if (el.dataset.stop) stop(el.dataset.stop);
@@ -453,10 +464,17 @@ $('#composer').addEventListener('submit', async e => {
   const before = draft.value;
   draft.value = '';
   grow(draft);
+  const id = state.openId;
+  const queuing = state.agents.get(id)?.status === 'working';
   try {
-    await api(`/api/agents/${encodeURIComponent(state.openId)}/prompt`, { text });
-    state.sent.add(state.openId);
-    toast('Sent');
+    if (queuing) {
+      await api(`/api/agents/${encodeURIComponent(id)}/queue`, { text });
+      toast('Queued. It sends when this turn finishes.');
+    } else {
+      await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text });
+      state.sent.add(id);
+      toast('Sent');
+    }
   } catch (err) {
     draft.value = before;
     grow(draft);

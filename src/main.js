@@ -8,6 +8,7 @@ import { loadVocab } from './vocab.js';
 import { NextSteps, runClaude } from './nextsteps.js';
 import { Prefs } from './prefs.js';
 import { Marks } from './marks.js';
+import { Queue } from './queue.js';
 
 const home = os.homedir();
 const herdrDir = process.env.HERDR_CONFIG_DIR || path.join(home, '.config', 'herdr');
@@ -23,7 +24,7 @@ const nextSteps = process.env.WHISTLE_NEXT_STEPS === 'off' ? null : new NextStep
   run: prompt => runClaude(prompt, { bin: process.env.WHISTLE_CLAUDE_BIN || 'claude', configDir: process.env.WHISTLE_CLAUDE_CONFIG_DIR }),
 });
 
-const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: loadVocab(claudeDir), nextSteps });
+const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: loadVocab(claudeDir), nextSteps, queue: new Queue(path.join(stateDir, 'queue.json')) });
 setInterval(() => { hub.vocab = loadVocab(claudeDir); }, 10 * 60 * 1000).unref();
 hub.start();
 

@@ -20,6 +20,7 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const plain = s => s.replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, '').replace(/\*\*|__|`/g, '').replace(/\s+/g, ' ').trim();
 
 const FINISHED = new Set(['done', 'idle']);
+const HANDOFF_MS = 60_000;
 
 // `model` is the list of next steps from the model, if any have landed.
 export function summarize(agent, transcript, question, { vocab = DEFAULT_VOCAB, model = null } = {}) {
@@ -50,8 +51,11 @@ export class Hub extends EventEmitter {
   #polling = null;
   #timer = null;
 
-  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null }) {
+  #handoff = new Map(); // id -> { sentAt, sawWorking } after sending a queued message
+
+  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null }) {
     super();
+    this.queue = queue;
     this.vocab = vocab;
     this.nextSteps = nextSteps;
     this.listSessions = sessions;
@@ -60,7 +64,7 @@ export class Hub extends EventEmitter {
     this.intervalMs = intervalMs;
   }
 
-  #merged(id) { return { ...this.#raw.get(id), ...(this.#extra.get(id) || EMPTY) }; }
+  #merged(id) { return { ...this.#raw.get(id), ...(this.#extra.get(id) || EMPTY), queue: this.queue?.list(id) ?? [] }; }
   agents() { return [...this.#raw.keys()].map(id => this.#merged(id)); }
   sessions() { return this.#sessions; }
 
@@ -83,6 +87,51 @@ export class Hub extends EventEmitter {
     agents.forEach((a, i) => {
       if (enriched[i] && !moved.has(a.id)) this.emit('change', { type: 'changed', agent: this.#merged(a.id), from: a.status });
     });
+    if (this.queue) await this.#drain(agents, sessions);
+  }
+
+  // Sends the next queued message to each agent that has finished its turn. After a
+  // send, waits until the agent has been seen working (or a minute has passed)
+  // before sending another, so two messages never land in the same turn.
+  async #drain(agents, sessions) {
+    const running = new Set(sessions.filter(s => s.running).map(s => s.name));
+    const live = new Set(agents.map(a => a.id));
+    for (const id of this.queue.ids()) if (!running.has(id.split('/')[0])) live.add(id);
+    for (const id of this.queue.prune(live)) console.error(`dropped queued messages for ${id}: agent is gone`);
+
+    const now = Date.now();
+    for (const a of agents) {
+      const h = this.#handoff.get(a.id);
+      if (a.status === 'working') { if (h) h.sawWorking = true; continue; }
+      if (a.status !== 'done' && a.status !== 'idle') continue;
+      const next = this.queue.list(a.id)[0];
+      if (!next) { this.#handoff.delete(a.id); continue; }
+      if (h && !h.sawWorking && now - h.sentAt < HANDOFF_MS) continue;
+      try {
+        await this.prompt(a.id, next.text);
+        this.queue.remove(a.id, next.id);
+        this.#handoff.set(a.id, { sentAt: now, sawWorking: false });
+        this.emit('change', { type: 'changed', agent: this.#merged(a.id), from: a.status });
+      } catch (e) {
+        console.error(`could not send queued message to ${a.id}: ${e.message}`);
+        this.#handoff.set(a.id, { sentAt: now, sawWorking: false }); // retry in a minute
+      }
+    }
+  }
+
+  enqueue(id, text) {
+    if (!this.queue) throw new HerdrError('not_found', 'Queueing is not enabled.');
+    if (!this.#raw.has(id)) throw new HerdrError('not_found', `No agent ${id}`);
+    let item;
+    try { item = this.queue.add(id, text); } catch (e) { throw new HerdrError('bad_queue', e.message); }
+    this.emit('change', { type: 'changed', agent: this.#merged(id), from: this.#raw.get(id).status });
+    return item;
+  }
+
+  unqueue(id, itemId) {
+    if (!this.queue?.remove(id, itemId)) return false;
+    if (this.#raw.has(id)) this.emit('change', { type: 'changed', agent: this.#merged(id), from: this.#raw.get(id).status });
+    return true;
   }
 
   // Returns true when the summary fields changed.

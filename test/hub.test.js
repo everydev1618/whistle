@@ -159,3 +159,52 @@ test('summaries read as plain text, without markdown list markers', async () => 
   const t = { turns: [{ prompt: 'p', steps: [], answer: 'Intro.\n\n- This week: 15 hours.\n- Vidya has not approved.', files: {} }] };
   assert.equal(summarize({ status: 'done' }, t, null).summary, 'This week: 15 hours. Vidya has not approved.');
 });
+
+test('a queued message waits while working and is sent when the turn ends, one per turn', async () => {
+  const { Queue } = await import('../src/queue.js');
+  const queue = new Queue(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-hq-')), 'q.json'));
+  const state = { 'd.sock': [raw('w1:p1', 'working')] };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', queue });
+  const events = [];
+  hub.on('change', e => events.push(e));
+  await hub.poll();
+  hub.enqueue('default/w1:p1', 'push it');
+  hub.enqueue('default/w1:p1', 'then deploy');
+  assert.deepEqual(hub.agents()[0].queue.map(i => i.text), ['push it', 'then deploy']);
+  assert.deepEqual(events.at(-1).agent.queue.map(i => i.text), ['push it', 'then deploy']);
+  const prompts = () => rpc.calls.filter(c => c[1] === 'agent.prompt').map(c => c[2].text);
+
+  await hub.poll();
+  assert.deepEqual(prompts(), [], 'not while working');
+
+  state['d.sock'] = [raw('w1:p1', 'done')];
+  await hub.poll();
+  assert.deepEqual(prompts(), ['push it']);
+  assert.deepEqual(hub.agents()[0].queue.map(i => i.text), ['then deploy']);
+
+  await hub.poll();
+  assert.deepEqual(prompts(), ['push it'], 'waits for the agent to pick it up before sending the next');
+
+  state['d.sock'] = [raw('w1:p1', 'working')];
+  await hub.poll();
+  state['d.sock'] = [raw('w1:p1', 'idle')];
+  await hub.poll();
+  assert.deepEqual(prompts(), ['push it', 'then deploy']);
+  assert.deepEqual(hub.agents()[0].queue, []);
+});
+
+test('queued messages wait while the agent asks a question, can be cancelled, and need a known agent', async () => {
+  const { Queue } = await import('../src/queue.js');
+  const queue = new Queue(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-hq-')), 'q.json'));
+  const state = { 'd.sock': [raw('w1:p1', 'blocked')] };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', queue });
+  await hub.poll();
+  const item = hub.enqueue('default/w1:p1', 'push it');
+  await hub.poll();
+  assert.equal(rpc.calls.filter(c => c[1] === 'agent.prompt').length, 0);
+  assert.equal(hub.unqueue('default/w1:p1', item.id), true);
+  assert.deepEqual(hub.agents()[0].queue, []);
+  assert.throws(() => hub.enqueue('nope/w9:p9', 'x'), e => e.code === 'not_found');
+});

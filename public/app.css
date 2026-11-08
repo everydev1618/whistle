@@ -127,7 +127,15 @@ code { font-family: var(--f-mono); font-size: .86em }
 
 .dock { flex: none; border-top: 1px solid var(--line); padding: 10px var(--gutter-r) calc(10px + var(--bottom)) var(--gutter-l); display: grid; gap: 8px; background: var(--bg) }
 .dock .row { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none }
-.dock .row:empty { display: none }
+.dock .row:empty, .queued:empty { display: none }
+.queued { display: grid; gap: 4px }
+.qitem { display: flex; align-items: center; gap: 8px; border: 1px dashed var(--line); border-radius: 12px; padding: 6px 6px 6px 10px; font-size: 13.5px }
+.qlabel, .next span:first-child { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--working); flex: none }
+.qtext { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.qx { all: unset; cursor: pointer; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); flex: none }
+.next { display: flex; gap: 8px; align-items: baseline; font-size: 13px; overflow: hidden; white-space: nowrap }
+.next span:nth-child(2) { overflow: hidden; text-overflow: ellipsis }
+.next span:nth-child(3) { color: var(--muted); flex: none }
 .dock .row .chip { flex: none }
 .composer { display: flex; gap: 8px; align-items: flex-end; margin: 0 }
 .composer textarea { flex: 1; min-width: 0; resize: none; border: 1px solid var(--line); border-radius: 19px; padding: 8px 14px; font: inherit; font-size: 16px; background: var(--card); color: var(--ink); min-height: 38px; max-height: 140px; line-height: 1.35 }

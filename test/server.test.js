@@ -16,6 +16,13 @@ class FakeHub extends EventEmitter {
     this.sent.push(['prompt', id, text]);
   }
   async keys(id, keys) { this.sent.push(['keys', id, keys]); }
+  enqueue(id, text) {
+    if (id !== 'default/w1:p1') throw new HerdrError('not_found', 'no agent');
+    if (!text.trim()) throw new HerdrError('bad_queue', 'message is empty');
+    this.sent.push(['queue', id, text]);
+    return { id: 'q1', text, at: 't' };
+  }
+  unqueue(id, itemId) { return id === 'default/w1:p1' && itemId === 'q1'; }
 }
 
 let hub, server, base;
@@ -83,4 +90,23 @@ test('only allowed tailnet users get in when a list is set', async () => {
   assert.equal((await fetch(url, { headers: { 'tailscale-user-login': 'someone@else' } })).status, 403);
   assert.equal((await fetch(url, { headers: { 'tailscale-user-login': 'etdebruin@github' } })).status, 200);
   locked.close();
+});
+
+test('POST queue holds a message for later, DELETE cancels it', async () => {
+  const p = '/api/agents/' + encodeURIComponent('default/w1:p1') + '/queue';
+  let r = await post(p, { text: 'push it' });
+  assert.equal(r.status, 201);
+  assert.deepEqual(await r.json(), { id: 'q1', text: 'push it', at: 't' });
+  assert.deepEqual(hub.sent.at(-1), ['queue', 'default/w1:p1', 'push it']);
+  assert.equal((await post(p, { text: ' ' })).status, 400);
+  assert.equal((await post(p, { text: 5 })).status, 400);
+  assert.equal((await post('/api/agents/' + encodeURIComponent('nope/w9:p9') + '/queue', { text: 'x' })).status, 404);
+  assert.equal((await fetch(base + p + '/q1', { method: 'DELETE' })).status, 200);
+  assert.equal((await fetch(base + p + '/zz', { method: 'DELETE' })).status, 404);
+});
+
+test('app files tell browsers to check for a newer version every time', async () => {
+  const r = await fetch(base + '/app.js');
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('cache-control'), 'no-cache');
 });

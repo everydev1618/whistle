@@ -36,7 +36,7 @@ Share → Add to Home Screen.
 | `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
 | `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
-| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), cached Haiku suggestions (`nextsteps.json`) |
+| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), queued messages (`queue.json`), cached Haiku suggestions (`nextsteps.json`) |
 | `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
@@ -58,6 +58,8 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 | `GET /api/agents/:id` | agent + parsed transcript (turns, steps, answer, files, pending question) |
 | `POST /api/agents/:id/prompt` | `{ "text": "push it" }` → `agent.prompt` |
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
+| `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
+| `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
 | `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed) |
 | `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
 | `GET` / `PUT /api/prefs` | the caller's settings, e.g. `{ "filter": "Work" }`, keyed by Tailscale login |
@@ -80,6 +82,15 @@ Three layers, merged in this order (max 4, no repeats):
 
 In the session view a model button shows the prompt it will send; long-press any button to
 edit its text before sending.
+
+## Queue
+
+While an agent is working, the composer queues instead of sending, so a message never
+lands in the middle of a turn. The hub sends the first queued message once the agent is
+done or idle, then waits until it has seen the agent working again (or a minute passes)
+before sending the next. Queues are saved to `queue.json` in the state dir, wait while the
+agent asks a question, and are dropped only when the agent's pane is gone from a running
+herdr session.
 
 ## Questions
 
