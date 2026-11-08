@@ -6,6 +6,7 @@ import { createServer } from './server.js';
 import { findClaudeDirs } from './claude.js';
 import { loadVocab } from './vocab.js';
 import { NextSteps, runClaude } from './nextsteps.js';
+import { Prefs } from './prefs.js';
 
 const home = os.homedir();
 const herdrDir = process.env.HERDR_CONFIG_DIR || path.join(home, '.config', 'herdr');
@@ -23,6 +24,6 @@ const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: 
 setInterval(() => { hub.vocab = loadVocab(claudeDir); }, 10 * 60 * 1000).unref();
 hub.start();
 
-createServer({ hub, allowedUsers }).listen(port, host, () => {
+createServer({ hub, allowedUsers, prefs: new Prefs(process.env.WHISTLE_PREFS || path.join(home, '.config', 'whistle', 'prefs.json')) }).listen(port, host, () => {
   console.log(`whistle on http://${host}:${port}  herdr=${herdrDir}  claude=${claudeDir}  users=${allowedUsers.join(',') || 'any'}  next-steps=${nextSteps ? 'on' : 'off'}`);
 });

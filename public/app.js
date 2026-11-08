@@ -15,6 +15,25 @@ const state = {
   stopArmed: null,
 };
 
+// The saved filter, unless its session is gone, then All (the choice stays saved).
+function activeFilter() {
+  if (state.filter === 'all' || !state.sessions.length) return state.filter;
+  return state.sessions.some(s => s.name === state.filter) ? state.filter : 'all';
+}
+
+// The filter lives on the server per Tailscale user, so a Safari tab, the home-screen
+// app and other devices agree. Local storage is only for a fast first paint.
+function setFilter(f, { save = true } = {}) {
+  state.filter = f;
+  localSet('whistle.filter', f);
+  if (save) fetch('/api/prefs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filter: f }) }).catch(() => {});
+  if (!state.openId) renderHerd();
+}
+
+function loadPrefs() {
+  api('/api/prefs').then(p => { if (p.filter && p.filter !== state.filter) setFilter(p.filter, { save: false }); }).catch(() => {});
+}
+
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode */ } }
 
@@ -87,7 +106,8 @@ function ago(iso) {
 }
 
 function visible() {
-  return [...state.agents.values()].filter(a => state.filter === 'all' || a.session === state.filter);
+  const f = activeFilter();
+  return [...state.agents.values()].filter(a => f === 'all' || a.session === f);
 }
 
 // `full` shows what a model button will actually send under its label.
@@ -117,7 +137,7 @@ function renderHerd() {
   for (const a of state.agents.values()) counts.set(a.session, (counts.get(a.session) || 0) + 1);
   $('#sessions').innerHTML = [{ name: 'all', running: true }, ...state.sessions].map(s => {
     const n = s.name === 'all' ? state.agents.size : counts.get(s.name) || 0;
-    return `<button data-filter="${esc(s.name)}" aria-pressed="${state.filter === s.name}" class="${s.running ? '' : 'down'}">${s.name === 'all' ? 'All' : esc(s.name)} · ${n}</button>`;
+    return `<button data-filter="${esc(s.name)}" aria-pressed="${activeFilter() === s.name}" class="${s.running ? '' : 'down'}">${s.name === 'all' ? 'All' : esc(s.name)} · ${n}</button>`;
   }).join('');
 
   $('#g-asking').hidden = !asking.length;
@@ -366,7 +386,7 @@ document.addEventListener('click', e => {
     const chip = a?.suggestions?.[Number(el.dataset.i)];
     if (chip) act(a.id, chip);
   } else if (el.dataset.open) location.hash = `a=${encodeURIComponent(el.dataset.open)}`;
-  else if (el.dataset.filter) { state.filter = el.dataset.filter; localSet('whistle.filter', state.filter); renderHerd(); }
+  else if (el.dataset.filter) setFilter(el.dataset.filter);
   else if (el.dataset.stop) stop(el.dataset.stop);
   else if (el.dataset.esc) act(el.dataset.esc, { keys: ['esc'], label: 'Esc' });
   else if (el.dataset.key) act(state.openId, { keys: [el.dataset.key], label: el.querySelector('b')?.textContent });
@@ -405,3 +425,5 @@ $('#composer').addEventListener('submit', async e => {
 setInterval(() => { if (!state.openId) renderHerd(); }, 30_000); // keep "5m ago" fresh
 connect();
 route();
+loadPrefs();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadPrefs(); });

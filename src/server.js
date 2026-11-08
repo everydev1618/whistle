@@ -27,7 +27,7 @@ async function readJson(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
 }
 
-export function createServer({ hub, allowedUsers = [] }) {
+export function createServer({ hub, allowedUsers = [], prefs = null }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -41,6 +41,12 @@ export function createServer({ hub, allowedUsers = [] }) {
         return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [] });
       }
       if (req.method === 'GET' && parts[1] === 'events' && parts.length === 2) return events(req, res, hub);
+
+      if (parts[1] === 'prefs' && parts.length === 2 && prefs) {
+        const user = req.headers['tailscale-user-login'] || '';
+        if (req.method === 'GET') return send(res, 200, prefs.get(user));
+        if (req.method === 'PUT') return send(res, 200, prefs.set(user, await readJson(req)));
+      }
 
       if (parts[1] === 'agents' && parts[2]) {
         const id = decodeURIComponent(parts[2]);
