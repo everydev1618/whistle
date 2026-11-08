@@ -27,3 +27,28 @@ export function groupAgents(agents, marks, now = Date.now()) {
   finished.sort((x, y) => (isSeen(x, marks) - isSeen(y, marks)) || byRecent(x, y));
   return { asking, finished, working, earlier };
 }
+
+const NEEDS = a => (a.status === 'blocked' ? 0 : a.status === 'working' ? 1 : 2);
+
+// One tile per space: how many agents, and how many need you.
+export function spaceTiles(spaces, agents, marks) {
+  return spaces.map(space => {
+    const mine = agents.filter(a => a.spaceId === space.id);
+    const finished = mine.filter(a => (a.status === 'done' || a.status === 'idle'));
+    const latest = mine.reduce((m, a) => (when(a) > when(m ?? {}) ? a : m), null);
+    return {
+      space,
+      total: mine.length,
+      asking: mine.filter(a => a.status === 'blocked').length,
+      working: mine.filter(a => a.status === 'working').length,
+      fresh: finished.filter(a => !isSeen(a, marks) && !isDone(a, marks)).length, // not opened yet, however old
+      endedAt: latest?.endedAt ?? null,
+    };
+  });
+}
+
+// A space's agents: asking, working, new, then the rest, newest first.
+export function spaceAgents(agents, spaceId, marks) {
+  const rank = a => (NEEDS(a) < 2 ? NEEDS(a) : isSeen(a, marks) ? 3 : 2);
+  return agents.filter(a => a.spaceId === spaceId).sort((x, y) => rank(x) - rank(y) || byRecent(x, y));
+}

@@ -59,19 +59,31 @@ test('findSessions lists the default session and named sessions that have a sock
   ]);
 });
 
-test('listAllAgents merges agents from every running session and skips dead ones', async () => {
+test('listAllAgents merges agents and spaces from every running session and skips dead ones', async () => {
   const sessions = [{ name: 'default', socket: 'd' }, { name: 'gone', socket: 'g' }, { name: 'work', socket: 'w' }];
-  const fakeRpc = async (sock) => {
+  const fakeRpc = async (sock, method) => {
     if (sock === 'g') throw new HerdrError('unreachable', 'no server');
     const pane = sock === 'd' ? 'w1:p1' : 'w2:p3';
+    if (method === 'workspace.list') {
+      return { workspaces: [
+        { workspace_id: 'w9', label: 'later', number: 2, agent_status: 'idle', tab_count: 1, pane_count: 1 },
+        { workspace_id: pane.split(':')[0], label: 'proj ' + sock, number: 1, agent_status: 'done', tab_count: 3, pane_count: 4 },
+      ] };
+    }
     return { agents: [{ pane_id: pane, agent: 'claude', agent_status: 'done', terminal_title_stripped: 'T ' + sock, cwd: '/Users/me/Code/proj', workspace_id: pane.split(':')[0] }] };
   };
-  const { agents, sessions: status } = await listAllAgents(sessions, fakeRpc);
-  assert.deepEqual(agents.map(a => [a.id, a.session, a.paneId, a.status, a.title, a.project]), [
-    ['default/w1:p1', 'default', 'w1:p1', 'done', 'T d', 'proj'],
-    ['work/w2:p3', 'work', 'w2:p3', 'done', 'T w', 'proj'],
+  const { agents, sessions: status, spaces } = await listAllAgents(sessions, fakeRpc);
+  assert.deepEqual(agents.map(a => [a.id, a.session, a.paneId, a.status, a.title, a.project, a.spaceId]), [
+    ['default/w1:p1', 'default', 'w1:p1', 'done', 'T d', 'proj', 'default/w1'],
+    ['work/w2:p3', 'work', 'w2:p3', 'done', 'T w', 'proj', 'work/w2'],
   ]);
   assert.deepEqual(status, [{ name: 'default', running: true }, { name: 'gone', running: false }, { name: 'work', running: true }]);
+  assert.deepEqual(spaces.map(s => [s.id, s.session, s.workspaceId, s.label, s.number, s.tabs]), [
+    ['default/w1', 'default', 'w1', 'proj d', 1, 3],
+    ['default/w9', 'default', 'w9', 'later', 2, 1],
+    ['work/w2', 'work', 'w2', 'proj w', 1, 3],
+    ['work/w9', 'work', 'w9', 'later', 2, 1],
+  ]);
 });
 
 test('findTranscript follows pane process -> claude pid -> session file -> transcript', () => {

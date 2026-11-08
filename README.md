@@ -59,14 +59,15 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 
 | | |
 |---|---|
-| `GET /api/agents` | all agents across sessions, plus which sessions are running |
+| `GET /api/agents` | all agents and spaces (herdr workspaces) across sessions, plus which sessions are running |
+| `POST /api/spaces/:id/agents` | `{ "label", "prompt" }` → new tab in that space, in its agents' folder, starts Claude, sends the first prompt; `{ "id" }` |
 | `GET /api/agents/:id` | agent + parsed transcript (turns, steps, answer, files, pending question) |
 | `POST /api/agents/:id/prompt` | `{ "text": "push it" }` → `agent.prompt` |
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
 | `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
 | `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
 | `POST /api/uploads` | raw image body (`content-type: image/png\|jpeg\|gif\|webp`, ≤25 MB) → `{ "path" }` on this Mac. The app adds `[Image: <path>]` lines to the prompt so the agent reads it |
-| `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed) |
+| `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed / spaces) |
 | `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
 | `GET` / `PUT /api/prefs` | the caller's settings, e.g. `{ "filter": "Work" }`, keyed by Tailscale login |
 

@@ -9,7 +9,7 @@ import { HerdrError } from './herdr.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-const STATUS_FOR = { agent_blocked: 409, agent_not_found: 404, not_found: 404, unreachable: 503, timeout: 504 };
+const STATUS_FOR = { agent_blocked: 409, agent_not_ready: 409, agent_not_found: 404, not_found: 404, unreachable: 503, timeout: 504 };
 
 const send = (res, code, body) => {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -59,7 +59,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       if (parts[0] !== 'api') return serveStatic(url.pathname, res);
 
       if (req.method === 'GET' && parts[1] === 'agents' && parts.length === 2) {
-        return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [], version });
+        return send(res, 200, { agents: hub.agents(), sessions: hub.sessions?.() ?? [], spaces: hub.spaces?.() ?? [], version });
       }
       if (req.method === 'GET' && parts[1] === 'events' && parts.length === 2) return events(req, res, hub, version);
 
@@ -73,6 +73,15 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
         const file = uploads.save(await readBody(req, 25 * 1024 * 1024), req.headers['content-type']);
         log(`${req.headers['tailscale-user-login'] || 'local'} uploaded ${path.basename(file)}`);
         return send(res, 201, { path: file });
+      }
+
+      if (req.method === 'POST' && parts[1] === 'spaces' && parts[2] && parts[3] === 'agents' && parts.length === 4) {
+        const spaceId = decodeURIComponent(parts[2]);
+        const { label = '', prompt = '' } = await readJson(req);
+        if (typeof label !== 'string' || typeof prompt !== 'string') return fail(res, 400, 'bad_agent', 'label and prompt must be text.');
+        const made = await hub.newAgent(spaceId, { label, prompt });
+        log(`${req.headers['tailscale-user-login'] || 'local'} → ${spaceId} new agent ${made.id} ${JSON.stringify(label || prompt.slice(0, 60))}`);
+        return send(res, 201, made);
       }
 
       if (parts[1] === 'marks' && parts.length === 2 && marks) {
@@ -132,7 +141,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
 function events(req, res, hub, version) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
   const write = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  write('snapshot', { agents: hub.agents(), sessions: hub.sessions?.() ?? [], version });
+  write('snapshot', { agents: hub.agents(), sessions: hub.sessions?.() ?? [], spaces: hub.spaces?.() ?? [], version });
   const onChange = ev => write('change', ev);
   hub.on('change', onChange);
   const ping = setInterval(() => res.write(': ping\n\n'), 25_000);

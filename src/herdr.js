@@ -61,6 +61,7 @@ export function toAgent(session, a) {
     session,
     paneId: a.pane_id,
     workspaceId: a.workspace_id,
+    spaceId: `${session}/${a.workspace_id}`,
     tabId: a.tab_id,
     agent: a.agent,
     status: a.agent_status,
@@ -71,17 +72,27 @@ export function toAgent(session, a) {
   };
 }
 
+// A herdr workspace, which the phone calls a space.
+export function toSpace(session, w) {
+  return { id: `${session}/${w.workspace_id}`, session, workspaceId: w.workspace_id, label: w.label || w.workspace_id, number: w.number ?? 0, tabs: w.tab_count ?? 0 };
+}
+
 export async function listAllAgents(sessions, call = rpc) {
   const results = await Promise.all(sessions.map(async s => {
     try {
-      const r = await call(s.socket, 'agent.list', {}, { timeoutMs: 3000 });
-      return { name: s.name, running: true, agents: (r.agents || []).map(a => toAgent(s.name, a)) };
+      const [r, w] = await Promise.all([
+        call(s.socket, 'agent.list', {}, { timeoutMs: 3000 }),
+        call(s.socket, 'workspace.list', {}, { timeoutMs: 3000 }),
+      ]);
+      const spaces = (w.workspaces || []).map(x => toSpace(s.name, x)).sort((a, b) => a.number - b.number);
+      return { name: s.name, running: true, agents: (r.agents || []).map(a => toAgent(s.name, a)), spaces };
     } catch {
-      return { name: s.name, running: false, agents: [] };
+      return { name: s.name, running: false, agents: [], spaces: [] };
     }
   }));
   return {
     agents: results.flatMap(r => r.agents),
+    spaces: results.flatMap(r => r.spaces),
     sessions: results.map(({ name, running }) => ({ name, running })),
   };
 }

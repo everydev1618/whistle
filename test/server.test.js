@@ -23,6 +23,13 @@ class FakeHub extends EventEmitter {
     return { id: 'q1', text, at: 't' };
   }
   unqueue(id, itemId) { return id === 'default/w1:p1' && itemId === 'q1'; }
+  spaces() { return [{ id: 'default/w1', label: 'proj' }]; }
+  async newAgent(spaceId, opts) {
+    if (spaceId !== 'default/w1') throw new HerdrError('not_found', 'no space');
+    if (opts.prompt === 'slow') throw new HerdrError('agent_not_ready', 'still starting');
+    this.sent.push(['new', spaceId, opts]);
+    return { id: 'default/w1:p9' };
+  }
 }
 
 let hub, server, base;
@@ -171,4 +178,19 @@ test('POST /api/uploads saves an image and returns its path on this Mac', async 
     assert.deepEqual(saved, [['img', 'image/png']]);
     assert.equal((await fetch(url, { method: 'POST', headers: { 'content-type': 'image/heic' }, body: 'x' })).status, 400);
   } finally { s.close(); }
+});
+
+test('the agent list and event stream carry the spaces', async () => {
+  assert.deepEqual((await (await fetch(base + '/api/agents')).json()).spaces, [{ id: 'default/w1', label: 'proj' }]);
+});
+
+test('POST /api/spaces/:id/agents starts a new agent in that space', async () => {
+  const p = '/api/spaces/' + encodeURIComponent('default/w1') + '/agents';
+  const r = await post(p, { label: 'Pricing', prompt: 'go' });
+  assert.equal(r.status, 201);
+  assert.deepEqual(await r.json(), { id: 'default/w1:p9' });
+  assert.deepEqual(hub.sent.at(-1), ['new', 'default/w1', { label: 'Pricing', prompt: 'go' }]);
+  assert.equal((await post(p, { label: 5 })).status, 400);
+  assert.equal((await post('/api/spaces/' + encodeURIComponent('default/w7') + '/agents', {})).status, 404);
+  assert.equal((await post(p, { prompt: 'slow' })).status, 409);
 });

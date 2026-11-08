@@ -48,13 +48,15 @@ export class Hub extends EventEmitter {
   #tx = new Map();      // id -> { path, mtimeMs, transcript }
   #questions = new Map(); // id -> question parsed off the screen
   #sessions = [];
+  #spaces = [];
   #polling = null;
   #timer = null;
 
   #handoff = new Map(); // id -> { sentAt, sawWorking } after sending a queued message
 
-  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null, recheckMs = 10_000 }) {
+  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null, recheckMs = 10_000, pauseMs = 300 }) {
     super();
+    this.pauseMs = pauseMs;
     this.recheckMs = recheckMs;
     this.queue = queue;
     this.vocab = vocab;
@@ -68,6 +70,7 @@ export class Hub extends EventEmitter {
   #merged(id) { return { ...this.#raw.get(id), ...(this.#extra.get(id) || EMPTY), queue: this.queue?.list(id) ?? [] }; }
   agents() { return [...this.#raw.keys()].map(id => this.#merged(id)); }
   sessions() { return this.#sessions; }
+  spaces() { return this.#spaces; }
 
   poll() {
     // Never run two polls at once; a caller during a poll waits for that one.
@@ -76,10 +79,14 @@ export class Hub extends EventEmitter {
   }
 
   async #pollOnce() {
-    const { agents, sessions } = await listAllAgents(this.listSessions(), this.rpc);
+    const { agents, sessions, spaces = [] } = await listAllAgents(this.listSessions(), this.rpc);
     const events = diffAgents(this.#raw, agents);
     this.#raw = new Map(agents.map(a => [a.id, a]));
     this.#sessions = sessions;
+    if (JSON.stringify(spaces) !== JSON.stringify(this.#spaces)) {
+      this.#spaces = spaces;
+      this.emit('change', { type: 'spaces', spaces });
+    }
     const moved = new Set(events.filter(e => e.agent).map(e => e.agent.id));
     for (const e of events) if (e.type === 'removed') { this.#extra.delete(e.id); this.#tx.delete(e.id); this.#questions.delete(e.id); }
 
@@ -224,6 +231,44 @@ export class Hub extends EventEmitter {
   async prompt(id, text) {
     const { agent, socket } = this.#target(id);
     await this.rpc(socket, 'agent.prompt', { target: agent.paneId, text });
+  }
+
+  // Opens a tab in the space, in the folder its agents already work in, starts
+  // Claude there and sends the first prompt. Returns the new agent's id.
+  async newAgent(spaceId, { label = '', prompt = '' } = {}) {
+    const space = this.#spaces.find(s => s.id === spaceId);
+    if (!space) throw new HerdrError('not_found', `No space ${spaceId}`);
+    const socket = this.#socketFor(space);
+    const name = label.trim() || prompt.trim().split(/\s+/).slice(0, 4).join(' ') || 'agent';
+    const { panes = [] } = await this.rpc(socket, 'pane.list', { workspace_id: space.workspaceId });
+    const cwd = panes.find(p => p.agent)?.cwd || panes[0]?.cwd;
+    const made = await this.rpc(socket, 'tab.create', { workspace_id: space.workspaceId, ...(cwd ? { cwd } : {}), label: name });
+    const pane = made.root_pane.pane_id;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 24) || 'agent';
+    const tab = made.tab.tab_id.split(':t')[1];
+    await this.#startClaude(socket, `${slug}-t${tab}`, pane);
+    if (prompt.trim()) await this.rpc(socket, 'agent.prompt', { target: pane, text: prompt.trim() });
+    this.poll().catch(() => {});
+    return { id: `${space.session}/${pane}` };
+  }
+
+  // herdr won't start an agent until the new tab's shell is at its prompt, and
+  // agent.start returns before Claude is up, so wait on both (about 30s at most).
+  async #startClaude(socket, name, pane) {
+    const pause = () => new Promise(r => setTimeout(r, this.pauseMs));
+    for (let i = 0; ; i++) {
+      try { await this.rpc(socket, 'agent.start', { name, kind: 'claude', pane_id: pane, timeout_ms: 60_000 }); break; } catch (e) {
+        if (e.code !== 'agent_pane_busy' || i >= 50) throw e;
+        await pause();
+      }
+    }
+    for (let i = 0; i < 100; i++) {
+      const { agent } = await this.rpc(socket, 'agent.get', { target: pane }).catch(() => ({}));
+      if (agent?.interactive_ready) return;
+      if (agent?.agent_status === 'blocked') throw new HerdrError('agent_not_ready', 'Claude stopped on a question while starting.');
+      await pause();
+    }
+    throw new HerdrError('agent_not_ready', 'Claude did not finish starting.');
   }
 
   async keys(id, keys) {

@@ -85,6 +85,29 @@ code { font-family: var(--f-mono); font-size: .86em }
 .rest span:first-child { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .rest .proj { font-family: var(--f-mono); color: var(--muted); font-size: 11.5px; flex: none }
 
+/* spaces */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px }
+.tile { all: unset; box-sizing: border-box; cursor: pointer; aspect-ratio: 1; border-radius: 16px; background: var(--card); border: 1px solid var(--line); padding: 10px; display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.tile.hot { border-color: var(--blocked) }
+.tile .nm { font-size: 14px; font-weight: 800; letter-spacing: -.03em; line-height: 1.2; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+.tile .tag { align-self: flex-start }
+.tile .st { margin-top: auto; display: grid; gap: 2px; font-size: 11.5px; font-weight: 600 }
+.tile .st span { display: flex; align-items: center; gap: 6px }
+.tile .st span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none }
+.tile .st .ask { color: var(--blocked) }
+.tile .st .new { color: var(--done) }
+.tile .st .wk { color: var(--working) }
+.tile .st .wk::before { animation: pulse 1.1s infinite }
+.tile .ft { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums }
+.newagent { width: 100%; margin: 14px 0 10px; border: 1.5px dashed var(--line); background: none; border-radius: 16px; padding: 12px; font-weight: 700; color: var(--accent); display: flex; gap: 8px; justify-content: center; align-items: center }
+.newagent span { font-size: 19px; line-height: 1 }
+.sheet.make .ct { font-size: 17px }
+.sheet.make label { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 4px }
+.sheet.make input, .sheet.make textarea { font: inherit; font-size: 16px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card); color: var(--ink); width: 100%; resize: none }
+.sheet.make textarea { min-height: 96px }
+.sheet.make button { text-align: center }
+.sheet.make button.go { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+
 /* session */
 .nav { display: flex; align-items: center; gap: 8px; padding: calc(6px + var(--top)) var(--gutter-r) 10px calc(var(--gutter-l) - 6px); border-bottom: 1px solid var(--line); background: var(--bg) }
 .back { border: 0; background: none; color: var(--accent); font-weight: 700; font-size: 15px; padding: 6px; flex: none }
@@ -163,4 +186,4 @@ code { font-family: var(--f-mono); font-size: .86em }
 .toast[hidden] { display: none }
 .ptr { position: fixed; top: calc(var(--top, 0px) + 8px); left: 50%; transform: translate(-50%, 0); background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px; z-index: 40; pointer-events: none }
 .ptr[hidden] { display: none }
-@media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run { animation: none } .card { transition: none } }
+@media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run, .tile .st .wk::before { animation: none } .card { transition: none } }

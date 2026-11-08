@@ -1,5 +1,5 @@
 import { mdBlocks } from './md.js';
-import { groupAgents, isSeen, turnKey } from './herd.js';
+import { groupAgents, isSeen, turnKey, spaceTiles, spaceAgents } from './herd.js';
 import { withImages } from './attach.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -11,6 +11,8 @@ const state = {
   sessions: [],
   filter: localGet('whistle.filter') || 'all',
   openId: null,
+  spaceId: null,       // the space page that's open, or the one the open agent lives in
+  spaces: [],
   detail: null,
   showAllTurns: false,
   sent: new Set(),     // agents we just sent to, shown dimmed until herdr reports work
@@ -30,7 +32,7 @@ function setFilter(f, { save = true } = {}) {
   state.filter = f;
   localSet('whistle.filter', f);
   if (save) fetch('/api/prefs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ filter: f }) }).catch(() => {});
-  if (!state.openId) renderHerd();
+  render();
 }
 
 function loadMarks() {
@@ -52,7 +54,7 @@ function markDone(id) {
   const a = state.agents.get(id);
   mark(id, 'seen');
   mark(id, 'done');
-  if (state.openId === id) location.hash = '';
+  if (state.openId === id) location.hash = spaceHash(a);
   else render();
   toast(`Done with ${a?.title || a?.project || 'agent'}`, { label: 'Undo', run: () => { mark(id, 'undone'); render(); } });
 }
@@ -82,10 +84,12 @@ function connect() {
     else if (d.version && d.version !== state.version) updateReady();
     state.agents = new Map(d.agents.map(a => [a.id, a]));
     state.sessions = d.sessions;
+    state.spaces = d.spaces || [];
     render();
   });
   es.addEventListener('change', e => {
     const ev = JSON.parse(e.data);
+    if (ev.type === 'spaces') { state.spaces = ev.spaces; return render(); }
     if (ev.type === 'removed') state.agents.delete(ev.id);
     else {
       state.agents.set(ev.agent.id, ev.agent);
@@ -221,40 +225,101 @@ function chipHtml(id, chips, { full = false } = {}) {
 
 function sessionTag(a) { return a.session !== 'default' ? `<span class="tag">${esc(a.session)}</span>` : ''; }
 
+const inFilter = x => activeFilter() === 'all' || x.session === activeFilter();
+const spaceHash = a => (a?.spaceId ? `s=${encodeURIComponent(a.spaceId)}` : '');
+
 function renderHerd() {
   const list = visible();
-  // Asking: stuck until you answer. Finished: ended a turn in the last day and you
-  // haven't marked it done (new ones first). Earlier: everything quieter or older.
-  const { asking, finished, working, earlier } = groupAgents(list, state.marks);
-  const fresh = finished.filter(a => !isSeen(a, state.marks)).length;
+  // Asking stays on top across every space; everything else is one square per space.
+  const { asking, working } = groupAgents(list, state.marks);
+  const tiles = spaceTiles(state.spaces.filter(inFilter), list, state.marks);
+  const fresh = tiles.reduce((n, t) => n + t.fresh, 0);
 
-  $('#count').textContent = [asking.length && `${asking.length} asking`, fresh && `${fresh} new`, `${finished.length} finished`, `${working.length} working`].filter(Boolean).join(' · ');
+  $('#count').textContent = [asking.length && `${asking.length} asking`, fresh && `${fresh} new`, working.length && `${working.length} working`].filter(Boolean).join(' · ') || 'All quiet';
 
   const counts = new Map();
-  for (const a of state.agents.values()) counts.set(a.session, (counts.get(a.session) || 0) + 1);
+  for (const sp of state.spaces) counts.set(sp.session, (counts.get(sp.session) || 0) + 1);
   $('#sessions').innerHTML = [{ name: 'all', running: true }, ...state.sessions].map(s => {
-    const n = s.name === 'all' ? state.agents.size : counts.get(s.name) || 0;
+    const n = s.name === 'all' ? state.spaces.length : counts.get(s.name) || 0;
     return `<button data-filter="${esc(s.name)}" aria-pressed="${activeFilter() === s.name}" class="${s.running ? '' : 'down'}">${s.name === 'all' ? 'All' : esc(s.name)} · ${n}</button>`;
   }).join('');
 
   $('#g-asking').hidden = !asking.length;
   $('#asking').innerHTML = asking.map(card).join('');
-  $('#finished').innerHTML = finished.map(card).join('') || '<p class="empty">All caught up.</p>';
+  $('#tiles').innerHTML = tiles.map(tile).join('') || '<p class="empty">No herdr spaces running.</p>';
+  bindSwipes();
+}
 
-  $('#working').innerHTML = working.map(a => `
-    <article class="card" data-id="${esc(a.id)}">
+function tile(t) {
+  const sp = t.space;
+  const st = [
+    t.asking && `<span class="ask">${t.asking} asking</span>`,
+    t.fresh && `<span class="new">${t.fresh} new</span>`,
+    t.working && `<span class="wk">${t.working} working</span>`,
+  ].filter(Boolean).join('');
+  const foot = t.total ? `${t.total} agent${t.total > 1 ? 's' : ''}${t.endedAt ? ` · ${ago(t.endedAt)}` : ''}` : 'No agents';
+  return `<button class="tile${t.asking ? ' hot' : ''}" data-space="${esc(sp.id)}">
+    ${activeFilter() === 'all' && sp.session !== 'default' ? `<span class="tag">${esc(sp.session)}</span>` : ''}
+    <span class="nm">${esc(sp.label)}</span>
+    <span class="st">${st}</span>
+    <span class="ft">${foot}</span>
+  </button>`;
+}
+
+function workingCard(a) {
+  return `<article class="card working" data-id="${esc(a.id)}">
       <div class="meta"><span class="pill working">Working</span>${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${a.steps ? `${a.steps} steps` : ''}</span></div>
       <button class="open" data-open="${esc(a.id)}"><h2>${esc(a.title)}</h2></button>
       ${a.live ? `<div class="live"><span>▸</span><span>${esc(a.live)}</span></div>` : ''}
       ${a.queue?.length ? `<div class="next"><span>Next</span><span>${esc(a.queue[0].text)}</span>${a.queue.length > 1 ? `<span>+${a.queue.length - 1}</span>` : ''}</div>` : ''}
       <div class="bar"><i></i></div>
       <div class="chips"><button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button></div>
-    </article>`).join('');
-  $('#g-working').hidden = !working.length;
+    </article>`;
+}
 
-  $('#earlier').innerHTML = earlier.map(a => `<button class="rest" data-open="${esc(a.id)}"><span>${esc(a.title || a.project)}</span><span class="proj">${esc(a.project)} · ${ago(a.endedAt)}</span></button>`).join('');
-  $('#g-earlier').hidden = !earlier.length;
+// ---------- space ----------
+function renderSpace() {
+  const sp = state.spaces.find(x => x.id === state.spaceId);
+  const agents = spaceAgents([...state.agents.values()], state.spaceId, state.marks);
+  $('#sp-title').textContent = sp?.label || state.spaceId;
+  $('#sp-sub').textContent = `${sp?.session ?? ''} · ${agents.length} agent${agents.length === 1 ? '' : 's'}`;
+  $('#sp-list').innerHTML = agents.map(a => (a.status === 'working' ? workingCard(a) : card(a))).join('') || '<p class="empty">No agents here yet.</p>';
   bindSwipes();
+}
+
+function newAgentSheet(spaceId) {
+  closeSheet();
+  const sp = state.spaces.find(x => x.id === spaceId);
+  const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
+  const sheet = Object.assign(document.createElement('form'), { className: 'sheet make' });
+  sheet.innerHTML = `<b class="ct">New agent in ${esc(sp?.label || 'this space')}</b>
+    <label for="na-label">Name</label>
+    <input id="na-label" placeholder="e.g. Pricing page (the tab name in herdr)" autocomplete="off" maxlength="40">
+    <label for="na-prompt">First message</label>
+    <textarea id="na-prompt" placeholder="What should it work on? Leave empty to just start Claude."></textarea>
+    <button class="go" type="submit">Start Claude</button>
+    <button type="button" data-cancel>Cancel</button>`;
+  scrim.onclick = closeSheet;
+  $('[data-cancel]', sheet).onclick = closeSheet;
+  sheet.onsubmit = async e => {
+    e.preventDefault();
+    const go = $('.go', sheet);
+    go.disabled = true;
+    go.textContent = 'Starting Claude…';
+    try {
+      const { id } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/agents`, { label: $('#na-label').value, prompt: $('#na-prompt').value });
+      closeSheet();
+      // The new pane shows up on the next poll; open it once it's here.
+      for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
+      location.hash = `a=${encodeURIComponent(id)}`;
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'Start Claude';
+      toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new tab. Open it in herdr.' : `Not started: ${err.message}`, null, 5000);
+    }
+  };
+  document.body.append(scrim, sheet);
+  $('#na-label').focus();
 }
 
 function card(a) {
@@ -275,7 +340,7 @@ function card(a) {
 
 // Swipe right sends the top suggestion; swipe left marks a finished agent done.
 function bindSwipes() {
-  for (const card of document.querySelectorAll('#asking .card, #finished .card')) {
+  for (const card of document.querySelectorAll('#asking .card, #sp-list .card:not(.working)')) {
     const id = card.dataset.id;
     const a = state.agents.get(id);
     if (!a || state.sent.has(id)) continue;
@@ -338,7 +403,7 @@ async function loadDetail() {
     state.detail = d;
     renderSession();
   } catch (e) {
-    if (e.status === 404) { toast('That agent is gone.'); location.hash = ''; }
+    if (e.status === 404) { toast('That agent is gone.'); location.hash = state.spaceId ? `s=${encodeURIComponent(state.spaceId)}` : ''; }
   }
 }
 
@@ -369,6 +434,7 @@ function renderSession() {
   const a = state.agents.get(state.openId) || d?.agent;
   if (!a) return;
   $('#s-title').textContent = a.title || a.project;
+  $('#back').textContent = `‹ ${state.spaces.find(x => x.id === a.spaceId)?.label || 'Spaces'}`;
   $('#s-sub').textContent = `${a.project} · ${a.session}/${a.paneId}`;
   const pill = $('#s-pill');
   pill.className = `pill ${pillClass(a)}`;
@@ -451,17 +517,25 @@ function grow(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHe
 
 // ---------- routing ----------
 function route() {
-  const m = location.hash.match(/^#a=(.+)$/);
-  const id = m ? decodeURIComponent(m[1]) : null;
+  const a = location.hash.match(/^#a=(.+)$/);
+  const sp = location.hash.match(/^#s=(.+)$/);
+  const id = a ? decodeURIComponent(a[1]) : null;
   closeSheet();
   if (id !== state.openId) { state.detail = null; state.showAllTurns = false; delete $('#s-scroll').dataset.seen; $('#s-body').innerHTML = ''; }
   state.openId = id;
-  $('#herd').hidden = !!id;
+  state.spaceId = sp ? decodeURIComponent(sp[1]) : id ? state.agents.get(id)?.spaceId ?? null : null;
+  $('#herd').hidden = !!(id || sp);
+  $('#space').hidden = !sp;
   $('#session').hidden = !id;
-  if (id) { renderSession(); loadDetail(); } else renderHerd();
+  render();
+  if (id) loadDetail();
 }
 
-function render() { if (state.openId) renderSession(); else renderHerd(); }
+function render() {
+  if (state.openId) renderSession();
+  else if (location.hash.startsWith('#s=')) renderSpace();
+  else renderHerd();
+}
 
 let toastT;
 function toast(msg, action, ms) {
@@ -505,9 +579,10 @@ document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]
 
 document.addEventListener('click', e => {
   if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
-  const el = e.target.closest('[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
+  const el = e.target.closest('[data-space],[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
-  if (el.dataset.act) {
+  if (el.dataset.space) location.hash = `s=${encodeURIComponent(el.dataset.space)}`;
+  else if (el.dataset.act) {
     const a = state.agents.get(el.dataset.act);
     const chip = a?.suggestions?.[Number(el.dataset.i)];
     if (chip) act(a.id, chip);
@@ -530,7 +605,9 @@ document.addEventListener('click', e => {
   else if (el.closest('.answer') && !e.target.closest('a')) openSheet(el);
 });
 
-$('#back').onclick = () => { location.hash = ''; };
+$('#back').onclick = () => { location.hash = spaceHash(state.agents.get(state.openId) || state.detail?.agent); };
+$('#sp-back').onclick = () => { location.hash = ''; };
+$('#sp-new').onclick = () => newAgentSheet(state.spaceId);
 window.addEventListener('hashchange', route);
 
 const draft = $('#draft');
@@ -626,12 +703,13 @@ $('#composer').addEventListener('submit', async e => {
   }
 });
 
-setInterval(() => { if (!state.openId) renderHerd(); }, 30_000); // keep "5m ago" fresh
+setInterval(() => { if (!state.openId) render(); }, 30_000); // keep "5m ago" fresh
 connect();
 route();
 loadPrefs();
 loadMarks();
 pullToRefresh($('#herd-scroll'));
+pullToRefresh($('#sp-scroll'));
 pullToRefresh($('#s-scroll'));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) return;

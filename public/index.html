@@ -21,20 +21,29 @@
 <body>
   <main id="herd" class="view">
     <header class="herd-head">
-      <div class="t"><h1>Agents</h1><span class="count" id="count">Connecting…</span></div>
+      <div class="t"><h1>Spaces</h1><span class="count" id="count">Connecting…</span></div>
       <div class="sessions" id="sessions" role="group" aria-label="herdr sessions"></div>
     </header>
     <div class="scroll" id="herd-scroll">
       <section id="g-asking" hidden><div class="grp"><span>Asking you</span></div><div class="cards" id="asking"></div></section>
-      <section id="g-finished"><div class="grp"><span>Finished</span></div><div class="cards" id="finished"></div></section>
-      <section id="g-working" hidden><div class="grp"><span>Working</span></div><div class="cards" id="working"></div></section>
-      <section id="g-earlier" hidden><div class="grp"><span>Earlier</span></div><div id="earlier"></div></section>
+      <section id="g-spaces"><div class="grp"><span>Spaces</span></div><div class="tiles" id="tiles"></div></section>
+    </div>
+  </main>
+
+  <main id="space" class="view" hidden>
+    <header class="nav">
+      <button class="back" id="sp-back" aria-label="Back to spaces">‹ Spaces</button>
+      <div class="ttl"><b id="sp-title"></b><span id="sp-sub"></span></div>
+    </header>
+    <div class="scroll" id="sp-scroll">
+      <button class="newagent" id="sp-new"><span>+</span> New agent</button>
+      <div class="cards" id="sp-list"></div>
     </div>
   </main>
 
   <main id="session" class="view" hidden>
     <header class="nav">
-      <button class="back" id="back" aria-label="Back to agents">‹ Agents</button>
+      <button class="back" id="back" aria-label="Back to the space">‹ Back</button>
       <div class="ttl"><b id="s-title"></b><span id="s-sub"></span></div>
       <span class="pill" id="s-pill"></span>
     </header>

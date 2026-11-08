@@ -13,6 +13,19 @@ function fakeRpc(state) {
   const fn = async (socket, method, params) => {
     calls.push([socket, method, params]);
     if (method === 'agent.list') return { agents: state[socket] || [] };
+    if (method === 'workspace.list') return { workspaces: state.spaces?.[socket] || [] };
+    if (method === 'pane.list') return { panes: (state[socket] || []).filter(a => a.workspace_id === params.workspace_id) };
+    if (method === 'tab.create') return { tab: { tab_id: `${params.workspace_id}:t9` }, root_pane: { pane_id: `${params.workspace_id}:p9` } };
+    if (method === 'agent.start') {
+      if (state.busy > 0) { state.busy--; throw new HerdrError('agent_pane_busy', 'not an available shell'); }
+      return { agent: { pane_id: params.pane_id, launch_pending: true } };
+    }
+    if (method === 'agent.get') {
+      if (state.blocked) return { agent: { agent_status: 'blocked', interactive_ready: false } };
+      const ready = !(state.loading > 0);
+      if (!ready) state.loading--;
+      return { agent: { agent_status: ready ? 'idle' : 'unknown', interactive_ready: ready } };
+    }
     if (method === 'pane.process_info') return { process_info: { foreground_processes: [{ pid: 7, argv0: 'claude', argv: ['claude'] }] } };
     if (method === 'agent.prompt' || method === 'agent.send_keys') return { ok: true };
     if (method === 'agent.read') return { read: { text: fn.screen || '' } };
@@ -226,4 +239,70 @@ test('picks up a new transcript after /clear even when the status does not chang
   await hub.poll();
   assert.equal(hub.agents()[0].lastPrompt, null);
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('spaces come from every session, and a change in them is announced', async () => {
+  const state = { 'd.sock': [raw('w1:p1', 'idle')], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 1 }] } };
+  const hub = new Hub({ sessions: () => sessions, rpc: fakeRpc(state), claudeDir: '/nowhere' });
+  const events = [];
+  hub.on('change', e => events.push(e));
+  await hub.poll();
+  assert.deepEqual(hub.spaces().map(s => [s.id, s.label]), [['default/w1', 'proj']]);
+  assert.equal(events.filter(e => e.type === 'spaces').length, 1);
+  await hub.poll();
+  assert.equal(events.filter(e => e.type === 'spaces').length, 1, 'no event when nothing moved');
+  state.spaces['w.sock'] = [{ workspace_id: 'w4', label: 'other', number: 1, tab_count: 1 }];
+  await hub.poll();
+  const last = events.filter(e => e.type === 'spaces').at(-1);
+  assert.deepEqual(last.spaces.map(s => s.id), ['default/w1', 'work/w4']);
+});
+
+test('a new agent opens a tab in the space, in its folder, starts Claude and sends the first prompt', async () => {
+  const state = { 'w.sock': [{ ...raw('w2:p1', 'idle'), cwd: '/code/demo' }], spaces: { 'w.sock': [{ workspace_id: 'w2', label: 'demo', number: 1, tab_count: 1 }] } };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  const r = await hub.newAgent('work/w2', { label: 'Pricing page', prompt: 'make the pricing page' });
+  assert.deepEqual(r, { id: 'work/w2:p9' });
+  const made = rpc.calls.filter(c => ['tab.create', 'agent.start', 'agent.prompt'].includes(c[1]));
+  assert.ok(rpc.calls.some(c => c[1] === 'agent.get'), 'checks Claude is ready before prompting');
+  assert.deepEqual(made, [
+    ['w.sock', 'tab.create', { workspace_id: 'w2', cwd: '/code/demo', label: 'Pricing page' }],
+    ['w.sock', 'agent.start', { name: 'pricing-page-t9', kind: 'claude', pane_id: 'w2:p9', timeout_ms: 60000 }],
+    ['w.sock', 'agent.prompt', { target: 'w2:p9', text: 'make the pricing page' }],
+  ]);
+});
+
+test('a new agent with no name is named from its prompt, and an empty prompt sends nothing', async () => {
+  const state = { 'd.sock': [], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 0 }] } };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  await hub.newAgent('default/w1', { label: '', prompt: '' });
+  const create = rpc.calls.find(c => c[1] === 'tab.create');
+  assert.deepEqual(create[2], { workspace_id: 'w1', label: 'agent' }, 'no folder known, so herdr picks');
+  assert.equal(rpc.calls.find(c => c[1] === 'agent.start')[2].name, 'agent-t9');
+  assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false);
+  await hub.newAgent('default/w1', { prompt: 'Fix the login bug on mobile please' });
+  assert.equal(rpc.calls.filter(c => c[1] === 'tab.create').at(-1)[2].label, 'Fix the login bug');
+  await assert.rejects(hub.newAgent('default/w7', {}), e => e.code === 'not_found');
+});
+
+test('a new agent waits for the tab\'s shell, then for Claude to be ready, before the first prompt', async () => {
+  const state = { 'd.sock': [], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 0 }] }, busy: 2, loading: 3 };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  await hub.newAgent('default/w1', { prompt: 'go' });
+  const order = rpc.calls.map(c => c[1]).filter(m => ['agent.start', 'agent.get', 'agent.prompt'].includes(m));
+  assert.deepEqual(order, ['agent.start', 'agent.start', 'agent.start', 'agent.get', 'agent.get', 'agent.get', 'agent.get', 'agent.prompt']);
+});
+
+test('a new agent that stops on a question at startup reports it instead of prompting', async () => {
+  const state = { 'd.sock': [], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 0 }] }, blocked: true };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  await assert.rejects(hub.newAgent('default/w1', { prompt: 'go' }), e => e.code === 'agent_not_ready');
+  assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false);
 });
