@@ -704,7 +704,7 @@ document.addEventListener('pointerdown', e => {
   px = e.clientX; py = e.clientY;
   clearTimeout(pressT);
   if (el.dataset.space) {
-    pressT = setTimeout(() => { pressed = true; navigator.vibrate?.(10); spaceMenu(el.dataset.space); }, 450);
+    pressT = setTimeout(() => { pressed = true; getSelection()?.removeAllRanges(); navigator.vibrate?.(10); spaceMenu(el.dataset.space); }, 450);
     return;
   }
   pressT = setTimeout(() => {
@@ -723,6 +723,7 @@ document.addEventListener('pointerdown', e => {
   }, 450);
 });
 for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, () => clearTimeout(pressT));
+document.addEventListener('selectstart', e => { if (e.target.closest?.('[data-space]')) e.preventDefault(); });
 document.addEventListener('contextmenu', e => {
   if (e.target.closest('[data-act],[data-space]')) e.preventDefault();
   // A mouse right-click on a space opens its menu too.
