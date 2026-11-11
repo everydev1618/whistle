@@ -81,3 +81,13 @@ test('a space lists its agents: asking, working, new, then the rest by recency',
   const marks = { 's/w1:p2': { seen: ago(1) } };
   assert.deepEqual(ids(spaceAgents(agents, 's/w1', marks)), ['s/w1:p4', 's/w1:p3', 's/w1:p5', 's/w1:p2', 's/w1:p1']);
 });
+
+test('space page: agents marked done for this turn sink to the bottom', () => {
+  const agents = [
+    ag('s/w1:p1', 'done', 3, { spaceId: 's/w1' }),
+    ag('s/w1:p2', 'done', 1, { spaceId: 's/w1' }),
+    ag('s/w1:p3', 'idle', 2, { spaceId: 's/w1' }),
+  ];
+  const marks = { 's/w1:p2': { seen: ago(1), done: ago(1) } };
+  assert.deepEqual(ids(spaceAgents(agents, 's/w1', marks)), ['s/w1:p1', 's/w1:p3', 's/w1:p2']);
+});

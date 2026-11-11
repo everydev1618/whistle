@@ -47,8 +47,8 @@ export function spaceTiles(spaces, agents, marks) {
   });
 }
 
-// A space's agents: asking, working, new, then the rest, newest first.
+// A space's agents: asking, working, new, the rest, then ones marked done; newest first.
 export function spaceAgents(agents, spaceId, marks) {
-  const rank = a => (NEEDS(a) < 2 ? NEEDS(a) : isSeen(a, marks) ? 3 : 2);
+  const rank = a => (NEEDS(a) < 2 ? NEEDS(a) : isDone(a, marks) ? 4 : isSeen(a, marks) ? 3 : 2);
   return agents.filter(a => a.spaceId === spaceId).sort((x, y) => rank(x) - rank(y) || byRecent(x, y));
 }

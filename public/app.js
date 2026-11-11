@@ -1,5 +1,5 @@
 import { mdBlocks } from './md.js';
-import { groupAgents, isSeen, turnKey, spaceTiles, spaceAgents } from './herd.js';
+import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents } from './herd.js';
 import { withImages } from './attach.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -327,9 +327,10 @@ function card(a) {
   const body = a.question
     ? `<p class="q">${esc(a.question.question)}</p>`
     : a.summary ? `<p>${esc(a.summary)}</p>` : '';
-  const finished = a.status !== 'blocked';
+  const cleared = isDone(a, state.marks);
+  const finished = a.status !== 'blocked' && !cleared;
   const chips = sent ? '' : chipHtml(a.id, a.suggestions.slice(0, 3)) + (finished ? doneChip(a.id) : '');
-  return `<article class="card${sent ? ' sent' : ''}" data-id="${esc(a.id)}">
+  return `<article class="card${sent ? ' sent' : ''}${cleared ? ' cleared' : ''}" data-id="${esc(a.id)}">
     ${a.suggestions[0] && !sent ? `<div class="swipehint">${esc(a.suggestions[0].label)} ›</div>` : ''}
     ${finished && !sent ? '<div class="swipehint left">‹ Done</div>' : ''}
     <div class="meta">${pillHtml(a)}${sessionTag(a)}<span class="proj">${esc(a.project)}</span><span class="ago">${sent ? 'sent' : ago(a.endedAt)}</span></div>
@@ -345,7 +346,7 @@ function bindSwipes() {
     const a = state.agents.get(id);
     if (!a || state.sent.has(id)) continue;
     const top = a.suggestions?.[0];
-    const canDone = a.status !== 'blocked';
+    const canDone = a.status !== 'blocked' && !isDone(a, state.marks);
     if (!top && !canDone) continue;
     const right = $('.swipehint:not(.left)', card), left = $('.swipehint.left', card);
     let x0 = null, y0 = 0, dx = 0;
@@ -471,7 +472,7 @@ function renderSession() {
   if (a.status === 'working') dock += `<button class="chip ${state.stopArmed === a.id ? 'warn' : 'ghost'}" data-stop="${esc(a.id)}">${state.stopArmed === a.id ? 'Tap to stop' : 'Stop'}</button>`;
   if (a.status === 'blocked') dock += `<button class="chip ghost" data-esc="${esc(a.id)}">Dismiss (Esc)</button>`;
   if (a.status === 'done' || a.status === 'idle') {
-    dock += doneChip(a.id);
+    if (!isDone(a, state.marks)) dock += doneChip(a.id);
     dock += `<button class="chip ghost" data-clear="${esc(a.id)}">New session</button>`;
   }
   $('#s-queue').innerHTML = (a.queue || []).map((q, i) => `<div class="qitem"><span class="qlabel">${i ? 'Then' : 'Next'}</span><span class="qtext">${esc(q.text)}</span><button class="qx" data-unqueue="${esc(q.id)}" aria-label="Cancel queued message">✕</button></div>`).join('');
