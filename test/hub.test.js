@@ -15,6 +15,8 @@ function fakeRpc(state) {
     if (method === 'agent.list') return { agents: state[socket] || [] };
     if (method === 'workspace.list') return { workspaces: state.spaces?.[socket] || [] };
     if (method === 'pane.list') return { panes: (state[socket] || []).filter(a => a.workspace_id === params.workspace_id) };
+    if (method === 'workspace.create') return { workspace: { workspace_id: 'w5' }, tab: { tab_id: 'w5:t1' }, root_pane: { pane_id: 'w5:p1' } };
+    if (method === 'workspace.close') return { ok: true };
     if (method === 'tab.create') return { tab: { tab_id: `${params.workspace_id}:t9` }, root_pane: { pane_id: `${params.workspace_id}:p9` } };
     if (method === 'agent.start') {
       if (state.busy > 0) { state.busy--; throw new HerdrError('agent_pane_busy', 'not an available shell'); }
@@ -305,4 +307,49 @@ test('a new agent that stops on a question at startup reports it instead of prom
   await hub.poll();
   await assert.rejects(hub.newAgent('default/w1', { prompt: 'go' }), e => e.code === 'agent_not_ready');
   assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false);
+});
+
+test('a new space opens a herdr workspace in the folder, starts Claude and sends the first prompt', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-space-'));
+  const rpc = fakeRpc({ 'w.sock': [] });
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  const r = await hub.newSpace({ session: 'work', label: 'Pricing', cwd: dir, prompt: 'make the pricing page' });
+  assert.deepEqual(r, { spaceId: 'work/w5', id: 'work/w5:p1' });
+  const made = rpc.calls.filter(c => ['workspace.create', 'agent.start', 'agent.prompt'].includes(c[1]));
+  assert.deepEqual(made, [
+    ['w.sock', 'workspace.create', { label: 'Pricing', cwd: dir, focus: false }],
+    ['w.sock', 'agent.start', { name: 'pricing-t1', kind: 'claude', pane_id: 'w5:p1', timeout_ms: 60000 }],
+    ['w.sock', 'agent.prompt', { target: 'w5:p1', text: 'make the pricing page' }],
+  ]);
+});
+
+test('a new space is named after its folder, goes to the default session, and expands ~', async () => {
+  const rpc = fakeRpc({});
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  const r = await hub.newSpace({ cwd: '~' });
+  assert.equal(r.spaceId, 'default/w5');
+  const create = rpc.calls.find(c => c[1] === 'workspace.create');
+  assert.deepEqual(create, ['d.sock', 'workspace.create', { label: path.basename(os.homedir()), cwd: os.homedir(), focus: false }]);
+  assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false, 'no prompt, nothing sent');
+});
+
+test('a new space refuses a folder that does not exist, or an unknown session', async () => {
+  const rpc = fakeRpc({});
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await assert.rejects(hub.newSpace({ cwd: '/no/such/folder' }), e => e.code === 'bad_folder');
+  await assert.rejects(hub.newSpace({ cwd: '' }), e => e.code === 'bad_folder');
+  await assert.rejects(hub.newSpace({ cwd: os.tmpdir(), session: 'nope' }), e => e.code === 'not_found');
+  assert.equal(rpc.calls.some(c => c[1] === 'workspace.create'), false);
+});
+
+test('deleting a space closes its herdr workspace', async () => {
+  const state = { 'w.sock': [], spaces: { 'w.sock': [{ workspace_id: 'w2', label: 'old', number: 1, tab_count: 1 }] } };
+  const rpc = fakeRpc(state);
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  await hub.poll();
+  await hub.closeSpace('work/w2');
+  assert.deepEqual(rpc.calls.find(c => c[1] === 'workspace.close'), ['w.sock', 'workspace.close', { workspace_id: 'w2' }]);
+  await assert.rejects(hub.closeSpace('work/w9'), e => e.code === 'not_found');
 });

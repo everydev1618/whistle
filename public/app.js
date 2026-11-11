@@ -1,5 +1,5 @@
 import { mdBlocks } from './md.js';
-import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents } from './herd.js';
+import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents, arrangeSpaces } from './herd.js';
 import { withImages } from './attach.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -18,7 +18,18 @@ const state = {
   sent: new Set(),     // agents we just sent to, shown dimmed until herdr reports work
   stopArmed: null,
   marks: {},          // { agentId: { seen, done } } per turn, saved on the server
+  hidden: localList('whistle.hidden'), // space ids hidden from home, saved on the server
+  showHidden: false,
 };
+
+function localList(k) { try { return JSON.parse(localGet(k)) || []; } catch { return []; } }
+
+function setHidden(list) {
+  state.hidden = list;
+  localSet('whistle.hidden', JSON.stringify(list));
+  fetch('/api/prefs', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ hidden: list }) }).catch(() => {});
+  render();
+}
 
 // The saved filter, unless its session is gone, then All (the choice stays saved).
 function activeFilter() {
@@ -60,7 +71,10 @@ function markDone(id) {
 }
 
 function loadPrefs() {
-  api('/api/prefs').then(p => { if (p.filter && p.filter !== state.filter) setFilter(p.filter, { save: false }); }).catch(() => {});
+  api('/api/prefs').then(p => {
+    if (Array.isArray(p.hidden)) { state.hidden = p.hidden; localSet('whistle.hidden', JSON.stringify(p.hidden)); }
+    if (p.filter && p.filter !== state.filter) setFilter(p.filter, { save: false }); else render();
+  }).catch(() => {});
 }
 
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -244,13 +258,47 @@ function renderHerd() {
     return `<button data-filter="${esc(s.name)}" aria-pressed="${activeFilter() === s.name}" class="${s.running ? '' : 'down'}">${s.name === 'all' ? 'All' : esc(s.name)} · ${n}</button>`;
   }).join('');
 
+  // Active spaces (asking, working, new) are wide rows on top; quiet ones are squares.
+  const { active, quiet, hidden } = arrangeSpaces(tiles, state.hidden);
   $('#g-asking').hidden = !asking.length;
   $('#asking').innerHTML = asking.map(card).join('');
-  $('#tiles').innerHTML = tiles.map(tile).join('') || '<p class="empty">No herdr spaces running.</p>';
+  $('#g-active').hidden = !active.length;
+  $('#active').innerHTML = active.map(t => wide(t, list)).join('');
+  $('#quiet-h').textContent = active.length ? 'Quiet' : 'Spaces';
+  $('#g-spaces').hidden = !quiet.length && !!(active.length || hidden.length);
+  $('#tiles').innerHTML = quiet.map(t => tile(t)).join('') || '<p class="empty">No herdr spaces running.</p>';
+  $('#g-hidden').hidden = !hidden.length;
+  $('#hidden-t').textContent = `${state.showHidden ? '▾' : '▸'} Hidden · ${hidden.length}`;
+  $('#hidden-t').setAttribute('aria-expanded', String(state.showHidden));
+  $('#hidden').hidden = !state.showHidden;
+  $('#hidden').innerHTML = state.showHidden ? hidden.map(t => tile(t, { dim: true })).join('') : '';
+  $('#hint').hidden = tiles.length < 2;
   bindSwipes();
 }
 
-function tile(t) {
+const statusSpans = t => [
+  t.asking && `<span class="ask">${t.asking} asking</span>`,
+  t.working && `<span class="wk">${t.working} working</span>`,
+  t.fresh && `<span class="new">${t.fresh} new</span>`,
+].filter(Boolean).join('');
+
+// A wide row for an active space: what's going on, and the agents doing it.
+function wide(t, agents) {
+  const sp = t.space;
+  const u = t.asking ? 'u-ask' : t.working ? 'u-wk' : 'u-new';
+  const mine = spaceAgents(agents, sp.id, state.marks).filter(a => a.status === 'blocked' || a.status === 'working' || !isSeen(a, state.marks)).slice(0, 2);
+  const line = a => {
+    const what = a.status === 'blocked' ? a.question?.question : a.status === 'working' ? a.live : a.summary;
+    return `<span class="ln"><b>${esc(a.title || a.project)}</b>${what ? ` · ${esc(what)}` : ''}</span>`;
+  };
+  return `<button class="wide ${u}" data-space="${esc(sp.id)}">
+    <span class="hd">${activeFilter() === 'all' && sp.session !== 'default' ? `<span class="tag">${esc(sp.session)}</span>` : ''}<span class="nm">${esc(sp.label)}</span><span class="ft">${t.endedAt ? ago(t.endedAt) : ''}</span></span>
+    <span class="st">${statusSpans(t)}</span>
+    ${mine.map(line).join('')}
+  </button>`;
+}
+
+function tile(t, { dim = false } = {}) {
   const sp = t.space;
   const st = [
     t.asking && `<span class="ask">${t.asking} asking</span>`,
@@ -258,7 +306,7 @@ function tile(t) {
     t.working && `<span class="wk">${t.working} working</span>`,
   ].filter(Boolean).join('');
   const foot = t.total ? `${t.total} agent${t.total > 1 ? 's' : ''}${t.endedAt ? ` · ${ago(t.endedAt)}` : ''}` : 'No agents';
-  return `<button class="tile${t.asking ? ' hot' : ''}" data-space="${esc(sp.id)}">
+  return `<button class="tile${t.asking ? ' hot' : ''}${dim ? ' dim' : ''}" data-space="${esc(sp.id)}">
     ${activeFilter() === 'all' && sp.session !== 'default' ? `<span class="tag">${esc(sp.session)}</span>` : ''}
     <span class="nm">${esc(sp.label)}</span>
     <span class="st">${st}</span>
@@ -320,6 +368,97 @@ function newAgentSheet(spaceId) {
   };
   document.body.append(scrim, sheet);
   $('#na-label').focus();
+}
+
+// Long-press a space: hide it from home (Whistle only) or delete it in herdr.
+function spaceMenu(spaceId) {
+  const sp = state.spaces.find(x => x.id === spaceId);
+  if (!sp) return;
+  closeSheet();
+  const mine = [...state.agents.values()].filter(a => a.spaceId === spaceId);
+  const hidden = state.hidden.includes(spaceId);
+  const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
+  const sheet = Object.assign(document.createElement('div'), { className: 'sheet' });
+  sheet.innerHTML = `<b class="sh">${esc(sp.label)}<small>${esc(sp.session)} · ${mine.length} agent${mine.length === 1 ? '' : 's'}</small></b>
+    <button data-m="hide">${hidden ? 'Show on home' : 'Hide from home'}<small>${hidden ? 'Put it back with the other spaces.' : 'Only in Whistle. It keeps running in herdr, and questions still show under Asking you.'}</small></button>
+    <button data-m="delete" class="del">Delete space…<small>Closes it in herdr and ends its agents.</small></button>
+    <button data-m="cancel">Cancel</button>`;
+  scrim.onclick = closeSheet;
+  sheet.onclick = e => {
+    const m = e.target.closest('button')?.dataset.m;
+    if (!m) return;
+    closeSheet();
+    if (m === 'hide') {
+      setHidden(hidden ? state.hidden.filter(x => x !== spaceId) : [...state.hidden, spaceId]);
+      if (!hidden) toast(`Hid ${sp.label}`, { label: 'Undo', run: () => setHidden(state.hidden.filter(x => x !== spaceId)) });
+    } else if (m === 'delete') deleteSpace(sp, mine);
+  };
+  document.body.append(scrim, sheet);
+}
+
+function deleteSpace(sp, mine) {
+  const working = mine.filter(a => a.status === 'working').length;
+  confirmSheet({
+    title: `Delete ${sp.label}?`,
+    body: `Closes the workspace in herdr${mine.length ? ` and ends its ${mine.length} agent${mine.length === 1 ? '' : 's'}` : ''}.${working ? ` ${working} ${working === 1 ? 'is' : 'are'} still working.` : ''} Files on disk are not touched. This can't be undone.`,
+    label: 'Delete space',
+    run: async () => {
+      try {
+        await fetch(`/api/spaces/${encodeURIComponent(sp.id)}`, { method: 'DELETE' }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || `HTTP ${r.status}`); });
+        if (state.hidden.includes(sp.id)) setHidden(state.hidden.filter(x => x !== sp.id));
+        if (state.spaceId === sp.id) location.hash = '';
+        toast(`Deleted ${sp.label}`);
+      } catch (e) { toast(`Not deleted: ${e.message}`, null, 5000); }
+    },
+  });
+}
+
+// Folders the agents already work in, most recent first, to pick from.
+function knownFolders() {
+  const seen = new Map();
+  for (const a of [...state.agents.values()].sort((x, y) => (Date.parse(y.endedAt || 0) || 0) - (Date.parse(x.endedAt || 0) || 0))) {
+    if (a.cwd && !seen.has(a.cwd)) seen.set(a.cwd, true);
+  }
+  return [...seen.keys()];
+}
+
+function newSpaceSheet() {
+  closeSheet();
+  const running = state.sessions.filter(s => s.running);
+  const pick = activeFilter() !== 'all' ? activeFilter() : running.some(s => s.name === 'default') ? 'default' : running[0]?.name;
+  const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
+  const sheet = Object.assign(document.createElement('form'), { className: 'sheet make' });
+  sheet.innerHTML = `<b class="ct">New space</b>
+    <label for="ns-cwd">Folder</label>
+    <input id="ns-cwd" list="ns-folders" placeholder="~/Code/my-project" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+    <datalist id="ns-folders">${knownFolders().map(f => `<option value="${esc(f)}">`).join('')}</datalist>
+    <label for="ns-label">Name</label>
+    <input id="ns-label" placeholder="Defaults to the folder name" autocomplete="off" maxlength="40">
+    ${running.length > 1 ? `<label for="ns-session">herdr session</label><select id="ns-session">${running.map(s => `<option${s.name === pick ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
+    <label for="ns-prompt">First message</label>
+    <textarea id="ns-prompt" placeholder="What should Claude work on? Leave empty to just start it."></textarea>
+    <button class="go" type="submit">Create and start Claude</button>
+    <button type="button" data-cancel>Cancel</button>`;
+  scrim.onclick = closeSheet;
+  $('[data-cancel]', sheet).onclick = closeSheet;
+  sheet.onsubmit = async e => {
+    e.preventDefault();
+    const go = $('.go', sheet);
+    go.disabled = true;
+    go.textContent = 'Starting Claude…';
+    try {
+      const { id } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', cwd: $('#ns-cwd').value, label: $('#ns-label').value, prompt: $('#ns-prompt').value });
+      closeSheet();
+      for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
+      location.hash = `a=${encodeURIComponent(id)}`;
+    } catch (err) {
+      go.disabled = false;
+      go.textContent = 'Create and start Claude';
+      toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new space. Open it in herdr.' : `Not created: ${err.message}`, null, 5000);
+    }
+  };
+  document.body.append(scrim, sheet);
+  $('#ns-cwd').focus();
 }
 
 function card(a) {
@@ -552,14 +691,19 @@ function toast(msg, action, ms) {
 
 // ---------- events ----------
 // Long-press a reply button to put its text in the composer instead of sending it.
+// Long-press a space for its menu.
 let pressT = null, pressed = false, px = 0, py = 0;
 document.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - px, e.clientY - py) > 10) clearTimeout(pressT); });
 document.addEventListener('pointerdown', e => {
-  const el = e.target.closest('[data-act]');
+  const el = e.target.closest('[data-act],[data-space]');
   if (!el) return;
   pressed = false;
   px = e.clientX; py = e.clientY;
   clearTimeout(pressT);
+  if (el.dataset.space) {
+    pressT = setTimeout(() => { pressed = true; navigator.vibrate?.(10); spaceMenu(el.dataset.space); }, 450);
+    return;
+  }
   pressT = setTimeout(() => {
     const a = state.agents.get(el.dataset.act);
     const chip = a?.suggestions?.[Number(el.dataset.i)];
@@ -576,10 +720,15 @@ document.addEventListener('pointerdown', e => {
   }, 450);
 });
 for (const ev of ['pointerup', 'pointercancel']) document.addEventListener(ev, () => clearTimeout(pressT));
-document.addEventListener('contextmenu', e => { if (e.target.closest('[data-act]')) e.preventDefault(); });
+document.addEventListener('contextmenu', e => {
+  if (e.target.closest('[data-act],[data-space]')) e.preventDefault();
+  // A mouse right-click on a space opens its menu too.
+  const sp = e.target.closest('[data-space]');
+  if (sp && e.pointerType !== 'touch' && !pressed) spaceMenu(sp.dataset.space);
+});
 
 document.addEventListener('click', e => {
-  if (pressed && e.target.closest('[data-act]')) { pressed = false; return; }
+  if (pressed && e.target.closest('[data-act],[data-space]')) { pressed = false; return; }
   const el = e.target.closest('[data-space],[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.space) location.hash = `s=${encodeURIComponent(el.dataset.space)}`;
@@ -609,6 +758,8 @@ document.addEventListener('click', e => {
 $('#back').onclick = () => { location.hash = spaceHash(state.agents.get(state.openId) || state.detail?.agent); };
 $('#sp-back').onclick = () => { location.hash = ''; };
 $('#sp-new').onclick = () => newAgentSheet(state.spaceId);
+$('#new-space').onclick = newSpaceSheet;
+$('#hidden-t').onclick = () => { state.showHidden = !state.showHidden; renderHerd(); };
 window.addEventListener('hashchange', route);
 
 const draft = $('#draft');

@@ -47,3 +47,13 @@ test('GET and PUT /api/prefs read and write the caller\'s own prefs', async () =
     assert.deepEqual(await (await fetch(base, { headers: as('you@x.com') })).json(), {});
   } finally { server.close(); }
 });
+
+test('hidden spaces are a list of ids', () => {
+  const p = new Prefs(tmpFile());
+  assert.deepEqual(p.set('me', { hidden: ['default/w1', 'work/w2'] }), { hidden: ['default/w1', 'work/w2'] });
+  assert.deepEqual(p.set('me', { filter: 'all' }), { hidden: ['default/w1', 'work/w2'], filter: 'all' }, 'other prefs leave it alone');
+  assert.deepEqual(p.set('me', { hidden: [] }).hidden, []);
+  assert.deepEqual(p.set('me', { hidden: 'default/w1' }).hidden, [], 'not a list');
+  assert.deepEqual(p.set('me', { hidden: [3] }).hidden, [], 'not text');
+  assert.deepEqual(p.set('me', { hidden: ['x'.repeat(200)] }).hidden, [], 'too long');
+});

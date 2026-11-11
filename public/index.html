@@ -21,12 +21,15 @@
 <body>
   <main id="herd" class="view">
     <header class="herd-head">
-      <div class="t"><h1>Spaces</h1><span class="count" id="count">Connecting…</span></div>
+      <div class="t"><h1>Spaces</h1><span class="count" id="count">Connecting…</span><button class="add" id="new-space" aria-label="New space">+</button></div>
       <div class="sessions" id="sessions" role="group" aria-label="herdr sessions"></div>
     </header>
     <div class="scroll" id="herd-scroll">
       <section id="g-asking" hidden><div class="grp"><span>Asking you</span></div><div class="cards" id="asking"></div></section>
-      <section id="g-spaces"><div class="grp"><span>Spaces</span></div><div class="tiles" id="tiles"></div></section>
+      <section id="g-active" hidden><div class="grp"><span>Active</span></div><div class="wides" id="active"></div></section>
+      <section id="g-spaces"><div class="grp"><span id="quiet-h">Quiet</span></div><div class="tiles" id="tiles"></div></section>
+      <section id="g-hidden" hidden><button class="hidden-t" id="hidden-t" aria-expanded="false"></button><div class="tiles" id="hidden" hidden></div></section>
+      <p class="hint" id="hint">Long-press a space to hide or delete it.</p>
     </div>
   </main>
 

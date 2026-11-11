@@ -4,7 +4,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const VALID = { filter: v => typeof v === 'string' && v.length > 0 && v.length <= 64 };
+const VALID = {
+  filter: v => typeof v === 'string' && v.length > 0 && v.length <= 64,
+  hidden: v => Array.isArray(v) && v.length <= 500 && v.every(x => typeof x === 'string' && x.length > 0 && x.length <= 128), // space ids
+};
 
 export class Prefs {
   #data;

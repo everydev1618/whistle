@@ -24,6 +24,15 @@ class FakeHub extends EventEmitter {
   }
   unqueue(id, itemId) { return id === 'default/w1:p1' && itemId === 'q1'; }
   spaces() { return [{ id: 'default/w1', label: 'proj' }]; }
+  async newSpace(opts) {
+    if (opts.cwd === '/nope') throw new HerdrError('bad_folder', 'no such folder');
+    this.sent.push(['space', opts]);
+    return { spaceId: 'default/w5', id: 'default/w5:p1' };
+  }
+  async closeSpace(spaceId) {
+    if (spaceId !== 'default/w1') throw new HerdrError('not_found', 'no space');
+    this.sent.push(['close', spaceId]);
+  }
   async newAgent(spaceId, opts) {
     if (spaceId !== 'default/w1') throw new HerdrError('not_found', 'no space');
     if (opts.prompt === 'slow') throw new HerdrError('agent_not_ready', 'still starting');
@@ -193,4 +202,20 @@ test('POST /api/spaces/:id/agents starts a new agent in that space', async () =>
   assert.equal((await post(p, { label: 5 })).status, 400);
   assert.equal((await post('/api/spaces/' + encodeURIComponent('default/w7') + '/agents', {})).status, 404);
   assert.equal((await post(p, { prompt: 'slow' })).status, 409);
+});
+
+test('POST /api/spaces makes a new space', async () => {
+  const r = await post('/api/spaces', { session: 'default', label: 'Pricing', cwd: '/code/x', prompt: 'go' });
+  assert.equal(r.status, 201);
+  assert.deepEqual(await r.json(), { spaceId: 'default/w5', id: 'default/w5:p1' });
+  assert.deepEqual(hub.sent.at(-1), ['space', { session: 'default', label: 'Pricing', cwd: '/code/x', prompt: 'go' }]);
+  assert.equal((await post('/api/spaces', { cwd: 5 })).status, 400);
+  assert.equal((await post('/api/spaces', { cwd: '/nope' })).status, 400);
+});
+
+test('DELETE /api/spaces/:id closes the space', async () => {
+  const del = id => fetch(base + '/api/spaces/' + encodeURIComponent(id), { method: 'DELETE' });
+  assert.equal((await del('default/w1')).status, 200);
+  assert.deepEqual(hub.sent.at(-1), ['close', 'default/w1']);
+  assert.equal((await del('default/w7')).status, 404);
 });

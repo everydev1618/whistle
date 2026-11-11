@@ -75,6 +75,21 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
         return send(res, 201, { path: file });
       }
 
+      if (req.method === 'POST' && parts[1] === 'spaces' && parts.length === 2) {
+        const { session = '', label = '', cwd = '', prompt = '' } = await readJson(req);
+        if (![session, label, cwd, prompt].every(v => typeof v === 'string')) return fail(res, 400, 'bad_space', 'session, label, cwd and prompt must be text.');
+        const made = await hub.newSpace({ session, label, cwd, prompt });
+        log(`${req.headers['tailscale-user-login'] || 'local'} new space ${made.spaceId} in ${cwd}`);
+        return send(res, 201, made);
+      }
+
+      if (req.method === 'DELETE' && parts[1] === 'spaces' && parts[2] && parts.length === 3) {
+        const spaceId = decodeURIComponent(parts[2]);
+        await hub.closeSpace(spaceId);
+        log(`${req.headers['tailscale-user-login'] || 'local'} closed space ${spaceId}`);
+        return send(res, 200, { ok: true });
+      }
+
       if (req.method === 'POST' && parts[1] === 'spaces' && parts[2] && parts[3] === 'agents' && parts.length === 4) {
         const spaceId = decodeURIComponent(parts[2]);
         const { label = '', prompt = '' } = await readJson(req);
@@ -129,7 +144,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       return fail(res, 404, 'not_found', 'No such endpoint.');
     } catch (e) {
       if (e instanceof HerdrError) {
-        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image'].includes(e.code) ? 400 : 502);
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image', 'bad_folder', 'bad_space'].includes(e.code) ? 400 : 502);
         return fail(res, code, e.code, e.message);
       }
       console.error(e);

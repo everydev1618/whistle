@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents } from '../public/herd.js';
+import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents, arrangeSpaces } from '../public/herd.js';
 
 const NOW = Date.parse('2026-11-08T20:00:00Z');
 const ago = h => new Date(NOW - h * 3600e3).toISOString();
@@ -90,4 +90,38 @@ test('space page: agents marked done for this turn sink to the bottom', () => {
   ];
   const marks = { 's/w1:p2': { seen: ago(1), done: ago(1) } };
   assert.deepEqual(ids(spaceAgents(agents, 's/w1', marks)), ['s/w1:p1', 's/w1:p3', 's/w1:p2']);
+});
+
+const tileOf = (id, n, extra = {}) => ({ space: { id, label: id, number: n }, total: 1, asking: 0, working: 0, fresh: 0, endedAt: null, ...extra });
+const tids = list => list.map(t => t.space.id);
+
+test('active spaces (asking, working or new) go on top, most urgent first', () => {
+  const tiles = [
+    tileOf('quietOld', 1, { endedAt: ago(30) }),
+    tileOf('newOne', 2, { fresh: 1, endedAt: ago(2) }),
+    tileOf('busy', 3, { working: 2, endedAt: ago(5) }),
+    tileOf('asks', 4, { asking: 1, endedAt: ago(9) }),
+    tileOf('quietRecent', 5, { endedAt: ago(1) }),
+    tileOf('empty', 6, { total: 0 }),
+    tileOf('newer', 7, { fresh: 2, endedAt: ago(1) }),
+  ];
+  const { active, quiet, hidden } = arrangeSpaces(tiles, [], NOW);
+  assert.deepEqual(tids(active), ['asks', 'busy', 'newer', 'newOne']);
+  assert.deepEqual(tids(quiet), ['quietRecent', 'quietOld', 'empty'], 'quiet: most recently used first, empty last');
+  assert.deepEqual(hidden, []);
+});
+
+test('hidden spaces leave both lists, even when active', () => {
+  const tiles = [tileOf('a', 1, { asking: 1 }), tileOf('b', 2), tileOf('c', 3)];
+  const { active, quiet, hidden } = arrangeSpaces(tiles, ['a', 'c', 'gone'], NOW);
+  assert.deepEqual(tids(active), []);
+  assert.deepEqual(tids(quiet), ['b']);
+  assert.deepEqual(tids(hidden), ['a', 'c']);
+});
+
+test('a space whose only news is more than a day old stays quiet', () => {
+  const tiles = [tileOf('stale', 1, { fresh: 1, endedAt: ago(30) }), tileOf('today', 2, { fresh: 1, endedAt: ago(3) })];
+  const { active, quiet } = arrangeSpaces(tiles, [], NOW);
+  assert.deepEqual(tids(active), ['today']);
+  assert.deepEqual(tids(quiet), ['stale']);
 });

@@ -52,3 +52,21 @@ export function spaceAgents(agents, spaceId, marks) {
   const rank = a => (NEEDS(a) < 2 ? NEEDS(a) : isDone(a, marks) ? 4 : isSeen(a, marks) ? 3 : 2);
   return agents.filter(a => a.spaceId === spaceId).sort((x, y) => rank(x) - rank(y) || byRecent(x, y));
 }
+
+// Home layout: spaces that need you or are running go on top (asking, then
+// working, then new; newest first), the rest below by when they were last used.
+// Spaces the user hid sit apart, whatever they're doing.
+// New finishes only count as active for a day; older unread news stays quiet.
+const used = t => (t.endedAt ? Date.parse(t.endedAt) : -Infinity);
+
+export function arrangeSpaces(tiles, hiddenIds = [], now = Date.now()) {
+  const urgency = t => (t.asking ? 0 : t.working ? 1 : t.fresh && now - used(t) < RECENT_MS ? 2 : 3);
+  const hide = new Set(hiddenIds);
+  const shown = tiles.filter(t => !hide.has(t.space.id));
+  const newest = (x, y) => used(y) - used(x) || x.space.number - y.space.number;
+  return {
+    active: shown.filter(t => urgency(t) < 3).sort((x, y) => urgency(x) - urgency(y) || newest(x, y)),
+    quiet: shown.filter(t => urgency(t) === 3).sort((x, y) => (y.total > 0) - (x.total > 0) || newest(x, y)),
+    hidden: tiles.filter(t => hide.has(t.space.id)),
+  };
+}

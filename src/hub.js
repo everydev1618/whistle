@@ -5,6 +5,8 @@
 // Claude transcript (re-parsed only when the file changes) and, when blocked,
 // from the question on its screen.
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { rpc as defaultRpc, listAllAgents, HerdrError } from './herdr.js';
 import { findTranscript, readEntries } from './claude.js';
@@ -250,6 +252,34 @@ export class Hub extends EventEmitter {
     if (prompt.trim()) await this.rpc(socket, 'agent.prompt', { target: pane, text: prompt.trim() });
     this.poll().catch(() => {});
     return { id: `${space.session}/${pane}` };
+  }
+
+  // Opens a new herdr workspace in a folder on this Mac and starts Claude in it.
+  // Goes to the default session unless told otherwise. Returns the space and agent ids.
+  async newSpace({ session = '', label = '', cwd = '', prompt = '' } = {}) {
+    const dir = cwd.trim().replace(/^~(?=$|\/)/, os.homedir());
+    let isDir = false;
+    try { isDir = !!dir && fs.statSync(dir).isDirectory(); } catch { /* missing */ }
+    if (!isDir) throw new HerdrError('bad_folder', `No folder ${cwd || '(empty)'} on this Mac.`);
+    const all = this.listSessions();
+    const s = session ? all.find(x => x.name === session) : all.find(x => x.name === 'default') || all[0];
+    if (!s) throw new HerdrError('not_found', `No herdr session ${session || 'running'}`);
+    const name = label.trim() || path.basename(path.resolve(dir));
+    const made = await this.rpc(s.socket, 'workspace.create', { label: name, cwd: dir, focus: false });
+    const pane = made.root_pane.pane_id;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 24) || 'agent';
+    await this.#startClaude(s.socket, `${slug}-t${made.tab.tab_id.split(':t')[1]}`, pane);
+    if (prompt.trim()) await this.rpc(s.socket, 'agent.prompt', { target: pane, text: prompt.trim() });
+    this.poll().catch(() => {});
+    return { spaceId: `${s.name}/${made.workspace.workspace_id}`, id: `${s.name}/${pane}` };
+  }
+
+  // Closes the herdr workspace, which ends every pane in it.
+  async closeSpace(spaceId) {
+    const space = this.#spaces.find(s => s.id === spaceId);
+    if (!space) throw new HerdrError('not_found', `No space ${spaceId}`);
+    await this.rpc(this.#socketFor(space), 'workspace.close', { workspace_id: space.workspaceId });
+    this.poll().catch(() => {});
   }
 
   // herdr won't start an agent until the new tab's shell is at its prompt, and
