@@ -277,9 +277,9 @@ function renderHerd() {
 }
 
 const statusSpans = t => [
-  t.asking && `<span class="ask">${t.asking} asking</span>`,
-  t.working && `<span class="wk">${t.working} working</span>`,
-  t.fresh && `<span class="new">${t.fresh} new</span>`,
+  t.asking && `<span class="d-ask">${t.asking} asking</span>`,
+  t.working && `<span class="d-wk">${t.working} working</span>`,
+  t.fresh && `<span class="d-new">${t.fresh} new</span>`,
 ].filter(Boolean).join('');
 
 // A wide row for an active space: what's going on, and the agents doing it.
@@ -300,11 +300,7 @@ function wide(t, agents) {
 
 function tile(t, { dim = false } = {}) {
   const sp = t.space;
-  const st = [
-    t.asking && `<span class="ask">${t.asking} asking</span>`,
-    t.fresh && `<span class="new">${t.fresh} new</span>`,
-    t.working && `<span class="wk">${t.working} working</span>`,
-  ].filter(Boolean).join('');
+  const st = statusSpans(t);
   const foot = t.total ? `${t.total} agent${t.total > 1 ? 's' : ''}${t.endedAt ? ` · ${ago(t.endedAt)}` : ''}` : 'No agents';
   return `<button class="tile${t.asking ? ' hot' : ''}${dim ? ' dim' : ''}" data-space="${esc(sp.id)}">
     ${activeFilter() === 'all' && sp.session !== 'default' ? `<span class="tag">${esc(sp.session)}</span>` : ''}
@@ -355,8 +351,10 @@ function newAgentSheet(spaceId) {
     go.disabled = true;
     go.textContent = 'Starting Claude…';
     try {
-      const { id } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/agents`, { label: $('#na-label').value, prompt: $('#na-prompt').value });
+      const prompt = $('#na-prompt').value;
+      const { id, waiting } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/agents`, { label: $('#na-label').value, prompt });
       closeSheet();
+      if (waiting) toast(startupNote(prompt), null, 6000);
       // The new pane shows up on the next poll; open it once it's here.
       for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
       location.hash = `a=${encodeURIComponent(id)}`;
@@ -422,6 +420,9 @@ function knownFolders() {
   return [...seen.keys()];
 }
 
+// Claude stopped on a question while starting (often "trust this folder?").
+const startupNote = prompt => `Claude is asking something first.${prompt?.trim() ? ' Your message goes once you answer.' : ''}`;
+
 function newSpaceSheet() {
   closeSheet();
   const running = state.sessions.filter(s => s.running);
@@ -447,8 +448,10 @@ function newSpaceSheet() {
     go.disabled = true;
     go.textContent = 'Starting Claude…';
     try {
-      const { id } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', cwd: $('#ns-cwd').value, label: $('#ns-label').value, prompt: $('#ns-prompt').value });
+      const prompt = $('#ns-prompt').value;
+      const { id, waiting } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', cwd: $('#ns-cwd').value, label: $('#ns-label').value, prompt });
       closeSheet();
+      if (waiting) toast(startupNote(prompt), null, 6000);
       for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
       location.hash = `a=${encodeURIComponent(id)}`;
     } catch (err) {
@@ -602,7 +605,7 @@ function renderSession() {
   }
   if (a.question) {
     html += `<div class="ask"><div class="ctx">Waiting on you · ${esc(a.question.header)}</div><div class="qq">${esc(a.question.question)}</div>
-      ${a.question.options.map(o => `<button data-key="${o.n}"><b>${esc(o.label)}</b>${o.description ? `<span>${esc(o.description)}</span>` : ''}</button>`).join('')}</div>`;
+      ${a.question.options.map(o => `<button data-keys="${esc(JSON.stringify(o.keys ?? [String(o.n)]))}"><b>${esc(o.label)}</b>${o.description ? `<span>${esc(o.description)}</span>` : ''}</button>`).join('')}</div>`;
   }
   $('#s-body').innerHTML = html;
 
@@ -729,7 +732,7 @@ document.addEventListener('contextmenu', e => {
 
 document.addEventListener('click', e => {
   if (pressed && e.target.closest('[data-act],[data-space]')) { pressed = false; return; }
-  const el = e.target.closest('[data-space],[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-key],[data-strip],[data-earlier],.answer > *');
+  const el = e.target.closest('[data-space],[data-act],[data-done],[data-unqueue],[data-open],[data-filter],[data-stop],[data-clear],[data-esc],[data-keys],[data-strip],[data-earlier],.answer > *');
   if (!el) return;
   if (el.dataset.space) location.hash = `s=${encodeURIComponent(el.dataset.space)}`;
   else if (el.dataset.act) {
@@ -746,7 +749,7 @@ document.addEventListener('click', e => {
   else if (el.dataset.stop) stop(el.dataset.stop);
   else if (el.dataset.clear) clearSession(el.dataset.clear);
   else if (el.dataset.esc) act(el.dataset.esc, { keys: ['esc'], label: 'Esc' });
-  else if (el.dataset.key) act(state.openId, { keys: [el.dataset.key], label: el.querySelector('b')?.textContent });
+  else if (el.dataset.keys) act(state.openId, { keys: JSON.parse(el.dataset.keys), label: el.querySelector('b')?.textContent });
   else if (el.dataset.strip !== undefined) {
     const ol = el.nextElementSibling;
     ol.hidden = !ol.hidden;

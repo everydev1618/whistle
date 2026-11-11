@@ -32,7 +32,8 @@ function offerButtons(answer) {
 export function suggest({ status, question, transcript, cwd, vocab = DEFAULT_VOCAB }) {
   if (status === 'working') return [];
   if (question) {
-    return question.options.map((o, i) => ({ label: o.label, hint: o.description, keys: [String(o.n)], primary: i === 0 }));
+    // Arrow menus get no default: the first choice there is often "No, exit".
+    return question.options.map((o, i) => ({ label: o.label, hint: o.description, keys: o.keys ?? [String(o.n)], primary: i === 0 && !question.arrows }));
   }
   const last = transcript?.turns?.at(-1);
   if (!last) return [];

@@ -99,8 +99,8 @@ code { font-family: var(--f-mono); font-size: .86em }
 .wide .st { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; font-weight: 600 }
 .wide .st span, .tile .st span { display: flex; align-items: center; gap: 6px }
 .wide .st span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none }
-.wide .st .ask { color: var(--blocked) } .wide .st .new { color: var(--done) } .wide .st .wk { color: var(--working) }
-.wide .st .wk::before { animation: pulse 1.1s infinite }
+.wide .st .d-ask { color: var(--blocked) } .wide .st .d-new { color: var(--done) } .wide .st .d-wk { color: var(--working) }
+.wide .st .d-wk::before { animation: pulse 1.1s infinite }
 .wide .ln { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
 .wide .ln b { color: var(--ink); font-weight: 600 }
 .tile.dim { opacity: .5 }
@@ -116,10 +116,10 @@ code { font-family: var(--f-mono); font-size: .86em }
 .tile .tag { align-self: flex-start }
 .tile .st { margin-top: auto; display: grid; gap: 2px; font-size: 11.5px; font-weight: 600 }
 .tile .st span::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none }
-.tile .st .ask { color: var(--blocked) }
-.tile .st .new { color: var(--done) }
-.tile .st .wk { color: var(--working) }
-.tile .st .wk::before { animation: pulse 1.1s infinite }
+.tile .st .d-ask { color: var(--blocked) }
+.tile .st .d-new { color: var(--done) }
+.tile .st .d-wk { color: var(--working) }
+.tile .st .d-wk::before { animation: pulse 1.1s infinite }
 .tile .ft { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums }
 .newagent { width: 100%; margin: 14px 0 10px; border: 1.5px dashed var(--line); background: none; border-radius: 16px; padding: 12px; font-weight: 700; color: var(--accent); display: flex; gap: 8px; justify-content: center; align-items: center }
 .newagent span { font-size: 19px; line-height: 1 }
@@ -208,4 +208,4 @@ code { font-family: var(--f-mono); font-size: .86em }
 .toast[hidden] { display: none }
 .ptr { position: fixed; top: calc(var(--top, 0px) + 8px); left: 50%; transform: translate(-50%, 0); background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px; z-index: 40; pointer-events: none }
 .ptr[hidden] { display: none }
-@media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run, .tile .st .wk::before, .wide .st .wk::before { animation: none } .card { transition: none } }
+@media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run, .tile .st .d-wk::before, .wide .st .d-wk::before { animation: none } .card { transition: none } }

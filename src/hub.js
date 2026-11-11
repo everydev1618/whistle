@@ -248,10 +248,7 @@ export class Hub extends EventEmitter {
     const pane = made.root_pane.pane_id;
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 24) || 'agent';
     const tab = made.tab.tab_id.split(':t')[1];
-    await this.#startClaude(socket, `${slug}-t${tab}`, pane);
-    if (prompt.trim()) await this.rpc(socket, 'agent.prompt', { target: pane, text: prompt.trim() });
-    this.poll().catch(() => {});
-    return { id: `${space.session}/${pane}` };
+    return { id: `${space.session}/${pane}`, ...await this.#launch(socket, `${space.session}/${pane}`, `${slug}-t${tab}`, pane, prompt) };
   }
 
   // Opens a new herdr workspace in a folder on this Mac and starts Claude in it.
@@ -268,10 +265,8 @@ export class Hub extends EventEmitter {
     const made = await this.rpc(s.socket, 'workspace.create', { label: name, cwd: dir, focus: false });
     const pane = made.root_pane.pane_id;
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+|-+$/g, '').slice(0, 24) || 'agent';
-    await this.#startClaude(s.socket, `${slug}-t${made.tab.tab_id.split(':t')[1]}`, pane);
-    if (prompt.trim()) await this.rpc(s.socket, 'agent.prompt', { target: pane, text: prompt.trim() });
-    this.poll().catch(() => {});
-    return { spaceId: `${s.name}/${made.workspace.workspace_id}`, id: `${s.name}/${pane}` };
+    const id = `${s.name}/${pane}`;
+    return { spaceId: `${s.name}/${made.workspace.workspace_id}`, id, ...await this.#launch(s.socket, id, `${slug}-t${made.tab.tab_id.split(':t')[1]}`, pane, prompt) };
   }
 
   // Closes the herdr workspace, which ends every pane in it.
@@ -280,6 +275,24 @@ export class Hub extends EventEmitter {
     if (!space) throw new HerdrError('not_found', `No space ${spaceId}`);
     await this.rpc(this.#socketFor(space), 'workspace.close', { workspace_id: space.workspaceId });
     this.poll().catch(() => {});
+  }
+
+  // Starts Claude and sends the first prompt. If Claude stops on a question while
+  // starting (e.g. "trust this folder?"), the prompt waits in the queue until it's
+  // answered, and the result says { waiting: true } so the phone can show it.
+  async #launch(socket, id, name, pane, prompt) {
+    const text = prompt.trim();
+    try {
+      await this.#startClaude(socket, name, pane);
+    } catch (e) {
+      if (e.code !== 'agent_not_ready' || (text && !this.queue)) throw e;
+      await this.poll().catch(() => {});
+      if (text) this.queue.add(id, text);
+      return { waiting: true };
+    }
+    if (text) await this.rpc(socket, 'agent.prompt', { target: pane, text });
+    this.poll().catch(() => {});
+    return {};
   }
 
   // herdr won't start an agent until the new tab's shell is at its prompt, and

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Hub } from '../src/hub.js';
 import { HerdrError } from '../src/herdr.js';
+import { Queue } from '../src/queue.js';
 
 const sessions = [{ name: 'default', socket: 'd.sock' }, { name: 'work', socket: 'w.sock' }];
 
@@ -19,6 +20,7 @@ function fakeRpc(state) {
     if (method === 'workspace.close') return { ok: true };
     if (method === 'tab.create') return { tab: { tab_id: `${params.workspace_id}:t9` }, root_pane: { pane_id: `${params.workspace_id}:p9` } };
     if (method === 'agent.start') {
+      fn.onStart?.();
       if (state.busy > 0) { state.busy--; throw new HerdrError('agent_pane_busy', 'not an available shell'); }
       return { agent: { pane_id: params.pane_id, launch_pending: true } };
     }
@@ -300,13 +302,34 @@ test('a new agent waits for the tab\'s shell, then for Claude to be ready, befor
   assert.deepEqual(order, ['agent.start', 'agent.start', 'agent.start', 'agent.get', 'agent.get', 'agent.get', 'agent.get', 'agent.prompt']);
 });
 
-test('a new agent that stops on a question at startup reports it instead of prompting', async () => {
+test('a new agent that stops on a question at startup queues the first prompt for after it is answered', async () => {
   const state = { 'd.sock': [], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 0 }] }, blocked: true };
   const rpc = fakeRpc(state);
-  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0 });
+  const queue = new Queue(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-q-')), 'q.json'));
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0, queue });
+  await hub.poll();
+  rpc.onStart = () => state['d.sock'].push(raw('w1:p9', 'blocked'));
+  assert.deepEqual(await hub.newAgent('default/w1', { prompt: 'go' }), { id: 'default/w1:p9', waiting: true });
+  assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false);
+  assert.deepEqual(queue.list('default/w1:p9').map(i => i.text), ['go']);
+});
+
+test('without a queue, a blocked start still reports it so the prompt is not lost silently', async () => {
+  const state = { 'd.sock': [], spaces: { 'd.sock': [{ workspace_id: 'w1', label: 'proj', number: 1, tab_count: 0 }] }, blocked: true };
+  const hub = new Hub({ sessions: () => sessions, rpc: fakeRpc(state), claudeDir: '/nowhere', pauseMs: 0 });
   await hub.poll();
   await assert.rejects(hub.newAgent('default/w1', { prompt: 'go' }), e => e.code === 'agent_not_ready');
-  assert.equal(rpc.calls.some(c => c[1] === 'agent.prompt'), false);
+  assert.deepEqual(await hub.newAgent('default/w1', {}), { id: 'default/w1:p9', waiting: true }, 'nothing to lose without a prompt');
+});
+
+test('a new space whose Claude stops on the trust prompt comes back waiting, prompt queued', async () => {
+  const state = { 'd.sock': [], blocked: true };
+  const rpc = fakeRpc(state);
+  const queue = new Queue(path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whistle-q-')), 'q.json'));
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', pauseMs: 0, queue });
+  rpc.onStart = () => state['d.sock'].push(raw('w5:p1', 'blocked'));
+  assert.deepEqual(await hub.newSpace({ cwd: os.tmpdir(), prompt: 'build it' }), { spaceId: 'default/w5', id: 'default/w5:p1', waiting: true });
+  assert.deepEqual(queue.list('default/w5:p1').map(i => i.text), ['build it']);
 });
 
 test('a new space opens a herdr workspace in the folder, starts Claude and sends the first prompt', async () => {

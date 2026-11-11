@@ -14,6 +14,14 @@ test('a question on screen becomes one button per option, sent as its number key
   ]);
 });
 
+test('an arrow menu sends its option\'s keys, with no default button', () => {
+  const question = { header: 'Trust this folder?', question: '/x', arrows: true, options: [{ n: 1, label: 'No, exit', description: '', keys: ['enter'] }, { n: 2, label: 'Yes, I trust this folder', description: '', keys: ['down', 'enter'] }] };
+  assert.deepEqual(suggest({ status: 'blocked', question, transcript: tr() }).map(c => [c.label, c.keys, c.primary]), [
+    ['No, exit', ['enter'], false],
+    ['Yes, I trust this folder', ['down', 'enter'], false],
+  ]);
+});
+
 test('a bare question gets Yes and No', () => {
   const s = suggest({ status: 'done', transcript: tr(turn('All fixed.\n\nDoes that look right?')) });
   assert.deepEqual(s, [{ label: 'Yes', text: 'yes', primary: true }, { label: 'No', text: 'no', primary: false }]);
