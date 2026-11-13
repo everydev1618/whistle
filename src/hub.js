@@ -53,11 +53,14 @@ export class Hub extends EventEmitter {
   #spaces = [];
   #polling = null;
   #timer = null;
+  #running = false;
+  #nudged = false;
 
   #handoff = new Map(); // id -> { sentAt, sawWorking } after sending a queued message
 
-  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null, recheckMs = 10_000, pauseMs = 300 }) {
+  constructor({ sessions, rpc = defaultRpc, claudeDir, intervalMs = 1500, vocab = DEFAULT_VOCAB, nextSteps = null, queue = null, recheckMs = 10_000, pauseMs = 300, nudgeMs = 150 }) {
     super();
+    this.nudgeMs = nudgeMs;
     this.pauseMs = pauseMs;
     this.recheckMs = recheckMs;
     this.queue = queue;
@@ -201,13 +204,28 @@ export class Hub extends EventEmitter {
   }
 
   start() {
-    const tick = () => this.poll().catch(e => console.error('poll failed:', e.message)).finally(() => {
-      this.#timer = setTimeout(tick, this.intervalMs);
-    });
-    tick();
+    this.#running = true;
+    this.#tick();
   }
 
-  stop() { clearTimeout(this.#timer); }
+  #tick = () => {
+    this.#timer = null;
+    this.#nudged = false;
+    this.poll().catch(e => console.error('poll failed:', e.message)).finally(() => {
+      if (this.#running) this.#timer = setTimeout(this.#tick, this.#nudged ? this.nudgeMs : this.intervalMs);
+    });
+  };
+
+  // After the phone does something, look again soon so the new status shows up
+  // within a beat instead of after the full interval. One loop only: if a poll is
+  // in flight, the loop picks the short delay when it finishes.
+  #nudge() {
+    if (!this.#running) return;
+    this.#nudged = true;
+    if (this.#timer) { clearTimeout(this.#timer); this.#timer = setTimeout(this.#tick, this.nudgeMs); }
+  }
+
+  stop() { this.#running = false; clearTimeout(this.#timer); }
 
   #socketFor(agent) {
     const session = this.listSessions().find(s => s.name === agent.session);
@@ -233,6 +251,7 @@ export class Hub extends EventEmitter {
   async prompt(id, text) {
     const { agent, socket } = this.#target(id);
     await this.rpc(socket, 'agent.prompt', { target: agent.paneId, text });
+    this.#nudge();
   }
 
   // Opens a tab in the space, in the folder its agents already work in, starts
@@ -317,5 +336,6 @@ export class Hub extends EventEmitter {
   async keys(id, keys) {
     const { agent, socket } = this.#target(id);
     await this.rpc(socket, 'agent.send_keys', { target: agent.paneId, keys });
+    this.#nudge();
   }
 }

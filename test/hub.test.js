@@ -376,3 +376,21 @@ test('deleting a space closes its herdr workspace', async () => {
   assert.deepEqual(rpc.calls.find(c => c[1] === 'workspace.close'), ['w.sock', 'workspace.close', { workspace_id: 'w2' }]);
   await assert.rejects(hub.closeSpace('work/w9'), e => e.code === 'not_found');
 });
+
+test('after a prompt or keys, the running hub polls right away instead of waiting out the interval', async () => {
+  const rpc = fakeRpc({ 'd.sock': [raw('w1:p1', 'idle')] });
+  const hub = new Hub({ sessions: () => sessions, rpc, claudeDir: '/nowhere', intervalMs: 60_000, nudgeMs: 20 });
+  const lists = () => rpc.calls.filter(c => c[1] === 'agent.list').length;
+  hub.start();
+  try {
+    while (!hub.agents().length) await new Promise(r => setTimeout(r, 5));
+    const before = lists();
+    await hub.prompt('default/w1:p1', 'push it');
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(lists() > before, 'polled after the prompt');
+    const afterPrompt = lists();
+    await hub.keys('default/w1:p1', ['esc']);
+    await new Promise(r => setTimeout(r, 120));
+    assert.ok(lists() > afterPrompt, 'polled after the keys');
+  } finally { hub.stop(); }
+});

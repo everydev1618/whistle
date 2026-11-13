@@ -8,6 +8,7 @@
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --top: env(safe-area-inset-top, 0px); --bottom: env(safe-area-inset-bottom, 0px);
   --gutter-l: max(16px, env(safe-area-inset-left, 0px)); --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  --spring: cubic-bezier(.34, 1.56, .64, 1); --snap: cubic-bezier(.2, .9, .3, 1);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) { :root {
@@ -44,7 +45,7 @@ code { font-family: var(--f-mono); font-size: .86em }
 .cards { display: grid; gap: 10px }
 .empty { color: var(--muted); font-size: 14px; margin: 2px }
 
-.card { position: relative; border-radius: 18px; background: var(--card); border: 1px solid var(--line); padding: 12px 13px; display: grid; gap: 6px; touch-action: pan-y; transition: transform .22s, opacity .22s }
+.card { position: relative; border-radius: 18px; background: var(--card); border: 1px solid var(--line); padding: 12px 13px; display: grid; gap: 6px; touch-action: pan-y; transition: transform .32s var(--spring), opacity .2s }
 .card.dragging { transition: none }
 .card .meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); min-width: 0 }
 .card .proj { font-family: var(--f-mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
@@ -55,7 +56,8 @@ code { font-family: var(--f-mono); font-size: .86em }
 .card .q { color: var(--ink); font-weight: 600 }
 .swipehint { position: absolute; inset: 0; border-radius: 18px; background: var(--done); color: #fff; display: flex; align-items: center; padding-left: 18px; font-weight: 700; font-size: 14px; opacity: 0; pointer-events: none; z-index: -1 }
 .swipehint.left { background: var(--idle); justify-content: flex-end; padding: 0 18px 0 0 }
-.card.sent { opacity: .55 }
+.card.sent { opacity: .55; animation: sent .35s var(--spring) }
+@keyframes sent { 0% { transform: scale(.97) } 100% { transform: none } }
 .card.cleared { opacity: .5 }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 8px; text-transform: uppercase; letter-spacing: .05em; flex: none }
@@ -207,7 +209,47 @@ code { font-family: var(--f-mono); font-size: .86em }
 .toast[hidden] { display: none }
 .ptr { position: fixed; top: calc(var(--top, 0px) + 8px); left: 50%; transform: translate(-50%, 0); background: var(--card); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-weight: 600; padding: 6px 12px; border-radius: 999px; z-index: 40; pointer-events: none }
 .ptr[hidden] { display: none }
-@media (prefers-reduced-motion: reduce) { .bar i, .pill.working::before, .ticks i.run, .tile .st .d-wk::before, .wide .st .d-wk::before { animation: none } .card { transition: none } }
 
 /* Last, so `all: unset` on .wide/.tile can't undo it: long-press a space opens its menu, never a text selection. */
 [data-space], [data-space] * { -webkit-touch-callout: none !important; -webkit-user-select: none !important; user-select: none !important }
+
+/* ---------- motion: every tap answers right away ---------- */
+button, .card, .chip, .tile, .wide, .rest { transition: transform .28s var(--spring), background-color .15s, opacity .2s, border-color .15s }
+button:active, .chip:active, .tile:active, .wide:active, .rest:active, .card .open:active { transform: scale(.95); transition-duration: .06s }
+.wide:active, .rest:active, .card .open:active { transform: scale(.98) }
+.chip.primary:active, .ic.send:active, .add:active { filter: brightness(1.12) }
+.ic.send:active, .add:active { transform: scale(.86) }
+.answer > *:active { background: var(--accent-soft) }
+
+/* Moving between home, a space and an agent slides like a native stack. */
+.view.in-fwd { animation: in-fwd .26s var(--snap) }
+.view.in-back { animation: in-back .26s var(--snap) }
+@keyframes in-fwd { from { transform: translateX(28%); opacity: 0 } to { transform: none; opacity: 1 } }
+@keyframes in-back { from { transform: translateX(-18%); opacity: 0 } to { transform: none; opacity: 1 } }
+
+.sheet { animation: sheet-up .3s var(--snap) }
+.sheet.out { animation: sheet-down .16s ease-in forwards }
+.scrim { animation: fade .2s ease-out }
+.scrim.out { animation: fade .16s ease-in reverse forwards }
+@keyframes sheet-up { from { transform: translateY(100%) } to { transform: none } }
+@keyframes sheet-down { to { transform: translateY(100%) } }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+
+.toast:not([hidden]) { animation: toast-in .32s var(--spring) }
+@keyframes toast-in { from { transform: translate(-50%, 16px) scale(.9); opacity: 0 } to { transform: translate(-50%, 0); opacity: 1 } }
+
+.you.pending { opacity: .7; animation: bubble .34s var(--spring); transform-origin: bottom right }
+@keyframes bubble { from { transform: scale(.6) translateY(10px); opacity: 0 } to { transform: none; opacity: .7 } }
+.pill { transition: background-color .25s, color .25s }
+
+.loading { display: grid; gap: 10px; padding-top: 16px }
+.loading i { display: block; height: 14px; border-radius: 7px; background: var(--line); opacity: .6; animation: shimmer 1s ease-in-out infinite alternate }
+.loading i:nth-child(1) { width: 45%; justify-self: end; height: 34px; border-radius: 17px }
+.loading i:nth-child(2) { width: 90% } .loading i:nth-child(3) { width: 75% } .loading i:nth-child(4) { width: 82% }
+@keyframes shimmer { to { opacity: .25 } }
+
+@media (prefers-reduced-motion: reduce) {
+  .bar i, .pill.working::before, .ticks i.run, .tile .st .d-wk::before, .wide .st .d-wk::before, .loading i { animation: none }
+  .view, .sheet, .scrim, .toast, .you.pending, .card.sent { animation: none !important }
+  .card, button, .chip, .tile, .wide, .rest { transition: none }
+}

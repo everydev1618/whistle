@@ -20,6 +20,8 @@ const state = {
   marks: {},          // { agentId: { seen, done } } per turn, saved on the server
   hidden: localList('whistle.hidden'), // space ids hidden from home, saved on the server
   showHidden: false,
+  details: new Map(),  // agentId -> last detail, so reopening an agent paints at once
+  pending: null,       // { id, text, at } a message sent but not yet in the transcript
 };
 
 function localList(k) { try { return JSON.parse(localGet(k)) || []; } catch { return []; } }
@@ -147,17 +149,29 @@ function pullToRefresh(scroller) {
 }
 
 // ---------- actions ----------
+// Optimistic: the card dims and the toast shows on the tap, and undo if herdr says no.
 async function act(id, chip) {
   const a = state.agents.get(id);
+  navigator.vibrate?.(8);
+  state.sent.add(id);
+  if (chip.text) showPending(id, chip.text);
+  toast(`Sent to ${a?.project || 'agent'}: ${chip.label || chip.text}`);
+  render();
   try {
     if (chip.keys) await api(`/api/agents/${encodeURIComponent(id)}/keys`, { keys: chip.keys });
     else await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text: chip.text });
-    state.sent.add(id);
-    toast(`Sent to ${a?.project || 'agent'}: ${chip.label || chip.text}`);
-    render();
   } catch (e) {
+    state.sent.delete(id);
+    if (state.pending?.id === id) state.pending = null;
+    render();
     toast(e.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not sent: ${e.message}`);
   }
+}
+
+// Your message shows in the conversation the moment you send it.
+function showPending(id, text) {
+  state.pending = { id, text, at: Date.now() };
+  setTimeout(() => { if (state.pending?.text === text && Date.now() - state.pending.at >= 20_000) { state.pending = null; render(); } }, 20_000);
 }
 
 function stop(id) {
@@ -537,11 +551,21 @@ function bindSwipes() {
 let refreshT;
 function refreshDetailSoon() { clearTimeout(refreshT); refreshT = setTimeout(loadDetail, 350); }
 
+const inflight = new Map(); // agentId -> detail request, shared by prefetch and open
+function fetchDetail(id) {
+  if (!inflight.has(id)) {
+    inflight.set(id, api(`/api/agents/${encodeURIComponent(id)}`)
+      .then(d => { state.details.set(id, d); return d; })
+      .finally(() => setTimeout(() => inflight.delete(id), 300)));
+  }
+  return inflight.get(id);
+}
+
 async function loadDetail() {
   const id = state.openId;
   if (!id) return;
   try {
-    const d = await api(`/api/agents/${encodeURIComponent(id)}`);
+    const d = await fetchDetail(id);
     if (state.openId !== id) return;
     state.detail = d;
     renderSession();
@@ -588,7 +612,8 @@ function renderSession() {
   const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
   const t = d?.transcript;
   let html = '';
-  if (!t) html = '<p class="notx">No Claude transcript found for this pane.</p>';
+  if (!d) html = '<div class="loading" aria-label="Loading"><i></i><i></i><i></i><i></i></div>';
+  else if (!t) html = '<p class="notx">No Claude transcript found for this pane.</p>';
   else {
     const turns = state.showAllTurns ? t.turns : t.turns.slice(-4);
     const hidden = t.totalTurns - turns.length;
@@ -602,6 +627,11 @@ function renderSession() {
       html += '</section>';
     });
     if (!t.turns.length) html = '<p class="notx">No turns yet.</p>';
+  }
+  const p = state.pending;
+  if (p?.id === a.id && d) {
+    if (t?.turns?.some(x => x.prompt?.trim() === p.text.trim())) state.pending = null;
+    else html += `<section class="turn"><div class="you pending">${esc(p.text)}</div></section>`;
   }
   if (a.question) {
     html += `<div class="ask"><div class="ctx">Waiting on you · ${esc(a.question.header)}</div><div class="qq">${esc(a.question.question)}</div>
@@ -652,7 +682,11 @@ function openSheet(el) {
   document.body.append(scrim, sheet);
 }
 function closeSheet() {
-  document.querySelectorAll('.sheet, .scrim').forEach(n => n.remove());
+  document.querySelectorAll('.sheet:not(.out), .scrim:not(.out)').forEach(n => {
+    n.classList.add('out');
+    n.style.pointerEvents = 'none';
+    setTimeout(() => n.remove(), 170);
+  });
   document.querySelectorAll('.answer .sel').forEach(n => n.classList.remove('sel'));
 }
 
@@ -664,14 +698,26 @@ function route() {
   const sp = location.hash.match(/^#s=(.+)$/);
   const id = a ? decodeURIComponent(a[1]) : null;
   closeSheet();
-  if (id !== state.openId) { state.detail = null; state.showAllTurns = false; delete $('#s-scroll').dataset.seen; $('#s-body').innerHTML = ''; }
+  if (id !== state.openId) { state.detail = id ? state.details.get(id) ?? null : null; state.showAllTurns = false; delete $('#s-scroll').dataset.seen; $('#s-body').innerHTML = ''; }
   state.openId = id;
   state.spaceId = sp ? decodeURIComponent(sp[1]) : id ? state.agents.get(id)?.spaceId ?? null : null;
+  const depth = id ? 2 : sp ? 1 : 0;
+  const view = ['herd', 'space', 'session'][depth];
+  if (lastDepth !== null && depth !== lastDepth) slideIn($(`#${view}`), depth > lastDepth ? 'in-fwd' : 'in-back');
+  lastDepth = depth;
   $('#herd').hidden = !!(id || sp);
   $('#space').hidden = !sp;
   $('#session').hidden = !id;
   render();
   if (id) loadDetail();
+}
+
+let lastDepth = null;
+function slideIn(el, cls) {
+  el.classList.remove('in-fwd', 'in-back');
+  void el.offsetWidth; // restart the animation
+  el.classList.add(cls);
+  el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
 
 function render() {
@@ -697,6 +743,11 @@ function toast(msg, action, ms) {
 // Long-press a space for its menu.
 let pressT = null, pressed = false, px = 0, py = 0;
 document.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - px, e.clientY - py) > 10) clearTimeout(pressT); });
+// Start loading an agent as soon as a finger lands on it, so it's there by the tap.
+document.addEventListener('pointerdown', e => {
+  const open = e.target.closest('[data-open]');
+  if (open) fetchDetail(open.dataset.open).catch(() => {});
+}, { capture: true });
 document.addEventListener('pointerdown', e => {
   const el = e.target.closest('[data-act],[data-space]');
   if (!el) return;
@@ -836,6 +887,12 @@ $('#composer').addEventListener('submit', async e => {
   grow(draft);
   const id = state.openId;
   const queuing = state.agents.get(id)?.status === 'working';
+  if (!attached.length) {
+    if (!queuing) { showPending(id, typed); state.sent.add(id); }
+    toast(queuing ? 'Queued. It sends when this turn finishes.' : 'Sent');
+    renderSession();
+  }
+  const optimistic = !attached.length;
   try {
     let text = typed;
     if (attached.length) {
@@ -844,14 +901,18 @@ $('#composer').addEventListener('submit', async e => {
     }
     if (queuing) {
       await api(`/api/agents/${encodeURIComponent(id)}/queue`, { text });
-      toast('Queued. It sends when this turn finishes.');
+      if (!optimistic) toast('Queued. It sends when this turn finishes.');
     } else {
+      if (!optimistic) showPending(id, typed || 'Screenshot');
       await api(`/api/agents/${encodeURIComponent(id)}/prompt`, { text });
       state.sent.add(id);
-      toast('Sent');
+      if (!optimistic) toast('Sent');
     }
     clearAttached();
   } catch (err) {
+    state.sent.delete(id);
+    if (state.pending?.id === id) state.pending = null;
+    renderSession();
     draft.value = before;
     grow(draft);
     renderAttached();
