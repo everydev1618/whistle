@@ -425,17 +425,12 @@ function deleteSpace(sp, mine) {
   });
 }
 
-// Folders the agents already work in, most recent first, to pick from.
-function knownFolders() {
-  const seen = new Map();
-  for (const a of [...state.agents.values()].sort((x, y) => (Date.parse(y.endedAt || 0) || 0) - (Date.parse(x.endedAt || 0) || 0))) {
-    if (a.cwd && !seen.has(a.cwd)) seen.set(a.cwd, true);
-  }
-  return [...seen.keys()];
-}
-
 // Claude stopped on a question while starting (often "trust this folder?").
 const startupNote = prompt => `Claude is asking something first.${prompt?.trim() ? ' Your message goes once you answer.' : ''}`;
+
+// Where a new space's code comes from: a folder already on the Mac, a new repo, or a GitHub clone.
+const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+const tilde = p => p.replace(/^\/Users\/[^/]+/, '~');
 
 function newSpaceSheet() {
   closeSheet();
@@ -444,11 +439,17 @@ function newSpaceSheet() {
   const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
   const sheet = Object.assign(document.createElement('form'), { className: 'sheet make' });
   sheet.innerHTML = `<b class="ct">New space</b>
-    <label for="ns-cwd">Folder</label>
-    <input id="ns-cwd" list="ns-folders" placeholder="~/Code/my-project" autocomplete="off" autocapitalize="off" spellcheck="false" required>
-    <datalist id="ns-folders">${knownFolders().map(f => `<option value="${esc(f)}">`).join('')}</datalist>
     <label for="ns-label">Name</label>
-    <input id="ns-label" placeholder="Defaults to the folder name" autocomplete="off" maxlength="40">
+    <input id="ns-label" placeholder="e.g. Lighthouse" autocomplete="off" maxlength="40">
+    <label>Code</label>
+    <div class="seg" role="tablist">
+      <button type="button" data-mode="folder" class="on">Folder</button>
+      <button type="button" data-mode="init">New repo</button>
+      <button type="button" data-mode="clone">Clone</button>
+    </div>
+    <input id="ns-find" type="search" placeholder="Find a folder" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="picks" id="ns-picks"><p class="note">Loading…</p></div>
+    <p class="note" id="ns-note" hidden></p>
     ${running.length > 1 ? `<label for="ns-session">herdr session</label><select id="ns-session">${running.map(s => `<option${s.name === pick ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
     <label for="ns-prompt">First message</label>
     <textarea id="ns-prompt" placeholder="What should Claude work on? Leave empty to just start it."></textarea>
@@ -456,14 +457,68 @@ function newSpaceSheet() {
     <button type="button" data-cancel>Cancel</button>`;
   scrim.onclick = closeSheet;
   $('[data-cancel]', sheet).onclick = closeSheet;
+
+  let mode = 'folder', chosen = null, root = '~/Code';
+  let folders = null, repos = null, repoErr = '';
+  const find = $('#ns-find', sheet), picks = $('#ns-picks', sheet), note = $('#ns-note', sheet), name = $('#ns-label', sheet);
+
+  const draw = () => {
+    find.hidden = picks.hidden = mode === 'init';
+    note.hidden = mode !== 'init';
+    find.placeholder = mode === 'clone' ? 'Find a GitHub repo' : 'Find a folder';
+    if (mode === 'init') {
+      const slug = slugify(name.value);
+      note.textContent = slug ? `Makes ${root}/${slug} and runs git init.` : 'Type a name above. Makes a folder for it in ' + root + ' and runs git init.';
+      return;
+    }
+    const q = find.value.trim().toLowerCase();
+    const list = mode === 'clone' ? repos : folders;
+    if (!list) { picks.innerHTML = `<p class="note">${esc(repoErr || 'Loading…')}</p>`; return; }
+    const hits = list.filter(x => !q || (x.full || x.name).toLowerCase().includes(q) || (x.description || '').toLowerCase().includes(q)).slice(0, 60);
+    picks.innerHTML = hits.length ? hits.map(x => mode === 'clone'
+      ? `<button type="button" data-pick="${esc(x.full)}" class="${chosen === x.full ? 'on' : ''}"><span>${esc(x.full)}${x.private ? ' <i>private</i>' : ''}</span><small>${x.local ? `Already in ${esc(tilde(x.local))}` : esc(x.description || ago(x.pushedAt))}</small></button>`
+      : `<button type="button" data-pick="${esc(x.path)}" class="${chosen === x.path ? 'on' : ''}"><span>${esc(x.name)}</span><small>${x.git ? 'git' : 'not a repo'}</small></button>`).join('')
+      : `<p class="note">Nothing matches.</p>`;
+  };
+
+  api('/api/folders').then(r => { root = tilde(r.root); folders = r.folders; draw(); }).catch(e => { folders = []; repoErr = e.message; draw(); });
+  const loadRepos = () => {
+    if (repos) return;
+    api('/api/repos').then(r => { repos = r.repos; draw(); }).catch(e => { repoErr = e.message; draw(); });
+  };
+
+  $('.seg', sheet).onclick = e => {
+    const b = e.target.closest('[data-mode]');
+    if (!b) return;
+    mode = b.dataset.mode;
+    chosen = null;
+    find.value = '';
+    name.placeholder = 'e.g. Lighthouse';
+    sheet.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+    if (mode === 'clone') loadRepos();
+    draw();
+  };
+  picks.onclick = e => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    chosen = chosen === b.dataset.pick ? null : b.dataset.pick;
+    if (chosen && !name.value) name.placeholder = chosen.split('/').at(-1);
+    draw();
+  };
+  find.oninput = draw;
+  name.oninput = () => { if (mode === 'init') draw(); };
+
   sheet.onsubmit = async e => {
     e.preventDefault();
+    const where = mode === 'init' ? { init: true } : mode === 'clone' ? { clone: chosen || '' } : { cwd: chosen || '' };
+    if (mode === 'init' && !slugify(name.value)) { toast('Give the new space a name.'); name.focus(); return; }
+    if (mode !== 'init' && !chosen) { toast(mode === 'clone' ? 'Pick a repo to clone.' : 'Pick a folder.'); return; }
     const go = $('.go', sheet);
     go.disabled = true;
-    go.textContent = 'Starting Claude…';
+    go.textContent = mode === 'clone' && !repos?.find(r => r.full === chosen)?.local ? 'Cloning…' : 'Starting Claude…';
     try {
       const prompt = $('#ns-prompt').value;
-      const { id, waiting } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', cwd: $('#ns-cwd').value, label: $('#ns-label').value, prompt });
+      const { id, waiting } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', label: name.value, prompt, ...where });
       closeSheet();
       if (waiting) toast(startupNote(prompt), null, 6000);
       for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
@@ -475,7 +530,8 @@ function newSpaceSheet() {
     }
   };
   document.body.append(scrim, sheet);
-  $('#ns-cwd').focus();
+  draw();
+  name.focus();
 }
 
 function card(a) {

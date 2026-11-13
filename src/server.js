@@ -48,7 +48,7 @@ async function readJson(req) {
   try { return JSON.parse(body.toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
 }
 
-export function createServer({ hub, allowedUsers = [], prefs = null, marks = null, uploads = null, version = appVersion(), log = console.log }) {
+export function createServer({ hub, folders = null, allowedUsers = [], prefs = null, marks = null, uploads = null, version = appVersion(), log = console.log }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -76,12 +76,20 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       }
 
       if (req.method === 'POST' && parts[1] === 'spaces' && parts.length === 2) {
-        const { session = '', label = '', cwd = '', prompt = '' } = await readJson(req);
-        if (![session, label, cwd, prompt].every(v => typeof v === 'string')) return fail(res, 400, 'bad_space', 'session, label, cwd and prompt must be text.');
+        const body = await readJson(req);
+        const { session = '', label = '', prompt = '', init = false, clone = '' } = body;
+        let { cwd = '' } = body;
+        if (![session, label, cwd, prompt, clone].every(v => typeof v === 'string')) return fail(res, 400, 'bad_space', 'session, label, cwd, prompt and clone must be text.');
+        if ((init || clone) && !folders) return fail(res, 400, 'bad_space', 'Making folders is off.');
+        if (init) cwd = await folders.create(label);
+        else if (clone) cwd = await folders.clone(clone);
         const made = await hub.newSpace({ session, label, cwd, prompt });
         log(`${req.headers['tailscale-user-login'] || 'local'} new space ${made.spaceId} in ${cwd}`);
         return send(res, 201, made);
       }
+
+      if (req.method === 'GET' && parts[1] === 'folders' && parts.length === 2 && folders) return send(res, 200, { root: folders.root, folders: folders.list() });
+      if (req.method === 'GET' && parts[1] === 'repos' && parts.length === 2 && folders) return send(res, 200, { repos: await folders.repos() });
 
       if (req.method === 'DELETE' && parts[1] === 'spaces' && parts[2] && parts.length === 3) {
         const spaceId = decodeURIComponent(parts[2]);
@@ -144,7 +152,7 @@ export function createServer({ hub, allowedUsers = [], prefs = null, marks = nul
       return fail(res, 404, 'not_found', 'No such endpoint.');
     } catch (e) {
       if (e instanceof HerdrError) {
-        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image', 'bad_folder', 'bad_space'].includes(e.code) ? 400 : 502);
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image', 'bad_folder', 'bad_space', 'bad_repo'].includes(e.code) ? 400 : 502);
         return fail(res, code, e.code, e.message);
       }
       console.error(e);

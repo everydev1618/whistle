@@ -41,10 +41,19 @@ class FakeHub extends EventEmitter {
   }
 }
 
-let hub, server, base;
+class FakeFolders {
+  made = [];
+  list() { return [{ name: 'whistle', path: '/code/whistle', git: true, mtime: 1 }]; }
+  async repos() { return [{ full: 'me/hop', name: 'hop', owner: 'me', description: '', private: false, pushedAt: 't', local: null }]; }
+  async create(name) { if (name === 'taken') throw new HerdrError('bad_folder', 'already there'); this.made.push(['create', name]); return `/code/${name}`; }
+  async clone(full) { this.made.push(['clone', full]); return `/code/${full.split('/')[1]}`; }
+}
+
+let hub, folders, server, base;
 before(async () => {
   hub = new FakeHub();
-  server = createServer({ hub, allowedUsers: [], log: () => {} });
+  folders = new FakeFolders();
+  server = createServer({ hub, folders, allowedUsers: [], log: () => {} });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -211,6 +220,24 @@ test('POST /api/spaces makes a new space', async () => {
   assert.deepEqual(hub.sent.at(-1), ['space', { session: 'default', label: 'Pricing', cwd: '/code/x', prompt: 'go' }]);
   assert.equal((await post('/api/spaces', { cwd: 5 })).status, 400);
   assert.equal((await post('/api/spaces', { cwd: '/nope' })).status, 400);
+});
+
+test('GET /api/folders and /api/repos list where a new space can live', async () => {
+  assert.deepEqual((await (await fetch(base + '/api/folders')).json()).folders.map(f => f.name), ['whistle']);
+  assert.deepEqual((await (await fetch(base + '/api/repos')).json()).repos.map(r => r.full), ['me/hop']);
+});
+
+test('POST /api/spaces can start a new repo or clone one first', async () => {
+  let r = await post('/api/spaces', { label: 'Big Idea', init: true, prompt: '' });
+  assert.equal(r.status, 201);
+  assert.deepEqual(folders.made.at(-1), ['create', 'Big Idea']);
+  assert.deepEqual(hub.sent.at(-1), ['space', { session: '', label: 'Big Idea', cwd: '/code/Big Idea', prompt: '' }]);
+  r = await post('/api/spaces', { clone: 'me/hop' });
+  assert.equal(r.status, 201);
+  assert.deepEqual(folders.made.at(-1), ['clone', 'me/hop']);
+  assert.equal(hub.sent.at(-1)[1].cwd, '/code/hop');
+  assert.equal((await post('/api/spaces', { label: 'taken', init: true })).status, 400);
+  assert.equal((await post('/api/spaces', { clone: 7 })).status, 400);
 });
 
 test('DELETE /api/spaces/:id closes the space', async () => {
