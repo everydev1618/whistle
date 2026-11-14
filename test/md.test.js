@@ -20,3 +20,15 @@ test('keeps the plain text of each block for quoting', () => {
   const [b] = mdBlocks('Use **this** one.');
   assert.equal(b.text, 'Use this one.');
 });
+
+test('a blockquote keeps its own paragraphs and lists instead of running together', () => {
+  const blocks = mdBlocks('Here it is.\n\n> Alex\n>\n> Sorry for the slow reply.\n>\n> * one\n> * two\n>\n> Sam\n\nAfter.');
+  assert.deepEqual(blocks.map(b => b.tag), ['p', 'blockquote', 'p']);
+  assert.equal(blocks[1].html, '<p>Alex</p><p>Sorry for the slow reply.</p><ul><li>one</li><li>two</li></ul><p>Sam</p>');
+  assert.equal(blocks[1].text, 'Alex\n\nSorry for the slow reply.\n\none\ntwo\n\nSam');
+});
+
+test('a quote line does not swallow the paragraph above it', () => {
+  const blocks = mdBlocks('Intro line\n> quoted');
+  assert.deepEqual(blocks.map(b => b.tag), ['p', 'blockquote']);
+});
