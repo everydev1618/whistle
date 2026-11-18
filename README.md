@@ -2,7 +2,7 @@
 
 Steer your herdr agents from your phone with taps instead of a terminal.
 
-Whistle runs on the Mac where herdr runs (my-mac). It reads every herdr session's
+Whistle runs on the Mac where [herdr](https://herdr.dev) runs. It reads every herdr session's
 socket, finds each Claude pane's transcript, and serves a small API to the phone.
 Your desk terminal stays the same session: the phone only sends input through herdr.
 
@@ -13,10 +13,15 @@ npm start                 # http://127.0.0.1:7717
 npm test && npm run lint
 ```
 
-## Running on my-mac
+## Running it for real
 
-It runs as a LaunchAgent and is served on the tailnet at **https://your-mac.your-tailnet.ts.net**
-(tailnet only, locked to `you@example.com`).
+It runs as a LaunchAgent and is reached over [Tailscale](https://tailscale.com): `tailscale serve`
+gives it an HTTPS address on your tailnet only (HTTPS matters: the phone won't share its
+microphone otherwise), and `WHISTLE_ALLOWED_USERS` limits it to your Tailscale login.
+
+```sh
+cp deploy/ai.whistle.server.plist.example deploy/ai.whistle.server.plist   # once; fill in your paths and login (gitignored)
+```
 
 ```sh
 npm run deploy               # test, lint, install/restart the LaunchAgent, wait until it answers
@@ -46,6 +51,9 @@ Share → Add to Home Screen.
 | `WHISTLE_VOICE` | on | `off` turns hold-to-talk off |
 | `WHISTLE_WHISPER_MODEL` | `<state dir>/models/ggml-large-v3-turbo-q5_0.bin` | |
 | `WHISTLE_WHISPER_BIN` | `whisper-cli` | |
+| `WHISTLE_CODE_DIR` | `~/Code` | where New space finds folders and makes or clones repos |
+| `WHISTLE_EXTRA_DIRS` | none | more folders to list, e.g. `work, /abs/path` (relative to the code dir) |
+| `WHISTLE_CLONE_DIRS` | none | clone an owner's repos elsewhere, e.g. `YourOrg=work` |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
 

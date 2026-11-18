@@ -15,6 +15,17 @@ const run = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
 const isDir = p => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
+// WHISTLE_EXTRA_DIRS="work, /abs/path" lists more folders to pick from;
+// WHISTLE_CLONE_DIRS="Org=work" clones that owner's repos there. Relative paths sit under the code root.
+export function foldersFromEnv(env, root) {
+  const at = p => path.resolve(root, p.trim());
+  const list = v => (v || '').split(',').map(s => s.trim()).filter(Boolean);
+  return {
+    extraRoots: list(env.WHISTLE_EXTRA_DIRS).map(at),
+    cloneRoots: Object.fromEntries(list(env.WHISTLE_CLONE_DIRS).map(s => s.split('=')).filter(([k, v]) => k && v).map(([k, v]) => [k.trim(), at(v)])),
+  };
+}
+
 export class Folders {
   #cache = null;
 

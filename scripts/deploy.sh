@@ -8,6 +8,11 @@ LABEL=ai.whistle.server
 DOMAIN="gui/$(id -u)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
+if [ ! -f "deploy/$LABEL.plist" ]; then
+  echo "✗ No deploy/$LABEL.plist. Copy deploy/$LABEL.plist.example there and fill it in." >&2
+  exit 1
+fi
+
 echo "→ tests"
 npm test --silent >/dev/null 2>&1 || { npm test; exit 1; }
 echo "→ lint"

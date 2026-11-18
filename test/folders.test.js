@@ -91,3 +91,12 @@ test('a failed clone says why', async () => {
   const f = new Folders({ root, exec: async () => { throw Object.assign(new Error('x'), { stderr: 'GraphQL: Could not resolve to a Repository' }); } });
   await assert.rejects(f.clone('me/missing'), e => e.code === 'clone_failed' && /Could not resolve/.test(e.message));
 });
+
+test('extra folders and per-owner clone folders come from the environment, relative to the code root', async () => {
+  const { foldersFromEnv } = await import('../src/folders.js');
+  assert.deepEqual(foldersFromEnv({}, '/code'), { extraRoots: [], cloneRoots: {} });
+  assert.deepEqual(
+    foldersFromEnv({ WHISTLE_EXTRA_DIRS: 'work, /abs/other', WHISTLE_CLONE_DIRS: 'AcmeCo=work, Me=/abs/mine' }, '/code'),
+    { extraRoots: ['/code/work', '/abs/other'], cloneRoots: { AcmeCo: '/code/work', Me: '/abs/mine' } },
+  );
+});

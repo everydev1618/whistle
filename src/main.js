@@ -10,7 +10,7 @@ import { Prefs } from './prefs.js';
 import { Marks } from './marks.js';
 import { Queue } from './queue.js';
 import { Uploads } from './uploads.js';
-import { Folders } from './folders.js';
+import { Folders, foldersFromEnv } from './folders.js';
 import { Transcriber } from './transcribe.js';
 import { Router, ROUTE_SYSTEM, ROUTE_SCHEMA } from './route.js';
 
@@ -20,9 +20,9 @@ const claudeDir = process.env.WHISTLE_CLAUDE_DIRS ? process.env.WHISTLE_CLAUDE_D
 const port = Number(process.env.PORT || 7717);
 const host = process.env.HOST || '127.0.0.1';
 const stateDir = process.env.WHISTLE_STATE_DIR || path.join(home, '.config', 'whistle');
-// New spaces live under ~/Code; Acme repos clone into ~/Code/su.
+// New spaces live under ~/Code; see foldersFromEnv for more folders and per-owner clone folders.
 const codeRoot = process.env.WHISTLE_CODE_DIR || path.join(home, 'Code');
-const folders = new Folders({ root: codeRoot, extraRoots: [path.join(codeRoot, 'su')], cloneRoots: { AcmeCo: path.join(codeRoot, 'su') } });
+const folders = new Folders({ root: codeRoot, ...foldersFromEnv(process.env, codeRoot) });
 const allowedUsers = (process.env.WHISTLE_ALLOWED_USERS || '').split(',').map(s => s.trim()).filter(Boolean);
 
 // Next-step buttons from Haiku via the `claude` CLI. WHISTLE_NEXT_STEPS=off turns them off.

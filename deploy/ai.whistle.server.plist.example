@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Copy to ai.whistle.server.plist (gitignored), replace YOU and the settings, then `npm run deploy`. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.whistle.server</string>
+  <key>ProgramArguments</key><array><string>/opt/homebrew/bin/node</string><string>src/main.js</string></array>
+  <key>WorkingDirectory</key><string>/Users/YOU/Code/whistle</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PORT</key><string>7717</string>
+    <key>WHISTLE_ALLOWED_USERS</key><string>you@example.com</string>
+    <key>PATH</key><string>/Users/YOU/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>WHISTLE_EXTRA_DIRS</key><string>work</string>
+    <key>WHISTLE_CLONE_DIRS</key><string>YourOrg=work</string>
+    <key>WHISTLE_CLAUDE_CONFIG_DIR</key><string>/Users/YOU/.claude</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/whistle.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/whistle.log</string>
+</dict>
+</plist>
