@@ -1123,6 +1123,7 @@ function holdToTalk(btn, onText) {
   let pressing = false, free = false, busy = false, rec = null, stream = null, chunks = [], t0 = 0, down = 0, x0 = 0, y0 = 0, tick = null, lock = null;
   const panel = $('#rec');
   const me = { finish: outcome => finish(outcome) };
+  const label = btn.querySelector('span'), idleLabel = label?.innerHTML; // the big bars say what a tap does now
   const show = (cls, title, sub) => {
     panel.hidden = false;
     panel.className = `rec ${cls}`;
@@ -1133,6 +1134,7 @@ function holdToTalk(btn, onText) {
     btn.classList.toggle('on', cls === 'on' || cls === 'free');
     btn.classList.toggle('away', cls === 'away');
     btn.classList.toggle('busy', cls === 'busy');
+    if (label) label.innerHTML = cls === 'free' ? 'Tap to send<small>Brainstorming</small>' : idleLabel;
   };
   const reset = () => {
     clearInterval(tick);
@@ -1144,6 +1146,7 @@ function holdToTalk(btn, onText) {
     panel.hidden = true;
     $('#rec-acts').hidden = true;
     btn.classList.remove('on', 'away', 'busy');
+    if (label) label.innerHTML = idleLabel;
   };
   const clock = () => { const s = Math.floor((Date.now() - t0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
   const title = () => `${free ? 'Brainstorming' : 'Listening'}… ${clock()}`;

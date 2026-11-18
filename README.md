@@ -1,153 +1,165 @@
 # Whistle
 
-Steer your herdr agents from your phone with taps instead of a terminal.
+**Steer your Claude Code agents from your phone.** Whistle is a small web app that runs on the
+Mac where your agents run in [herdr](https://herdr.dev). From your phone you can see what each agent
+is doing, answer its questions, reply with one tap, queue up what's next, send screenshots, and
+talk to it.
 
-Whistle runs on the Mac where [herdr](https://herdr.dev) runs. It reads every herdr session's
-socket, finds each Claude pane's transcript, and serves a small API to the phone.
-Your desk terminal stays the same session: the phone only sends input through herdr.
+It doesn't replace your terminal. Your agents keep running in herdr on the Mac, and the phone sends
+its taps and words to them through herdr, so you can pick up at your desk where you left off.
 
-## Run
+<table>
+  <tr>
+    <td><img src="docs/images/home.png" width="250" alt="Home: spaces that need you on top"></td>
+    <td><img src="docs/images/agent.png" width="250" alt="An agent's conversation with reply buttons"></td>
+    <td><img src="docs/images/question.png" width="250" alt="Answering an agent's question"></td>
+  </tr>
+  <tr>
+    <td align="center">Everything at a glance</td>
+    <td align="center">One-tap replies</td>
+    <td align="center">Answer questions</td>
+  </tr>
+</table>
+
+## What you need
+
+- **A Mac** running your agents in **[herdr](https://herdr.dev)**, with **[Claude Code](https://claude.com/claude-code)** signed in
+- **Node 22** or newer
+- **[Tailscale](https://tailscale.com)** on the Mac and your phone, with HTTPS turned on for your tailnet
+- For voice: `brew install whisper-cpp ffmpeg` and a Whisper model (see below)
+- Optional: the [GitHub CLI](https://cli.github.com) (`gh`), so New space can list and clone your repos
+
+## Setup
+
+**1. Get it running.**
 
 ```sh
-npm start                 # http://127.0.0.1:7717
-npm test && npm run lint
+git clone https://github.com/everydev1618/whistle.git ~/Code/whistle
+cd ~/Code/whistle
+npm install        # only test and lint tools; Whistle itself has no dependencies
+npm start          # http://127.0.0.1:7717
 ```
 
-## Running it for real
+Open http://127.0.0.1:7717 in a browser on the Mac. You should see your herdr spaces.
 
-It runs as a LaunchAgent and is reached over [Tailscale](https://tailscale.com): `tailscale serve`
-gives it an HTTPS address on your tailnet only (HTTPS matters: the phone won't share its
-microphone otherwise), and `WHISTLE_ALLOWED_USERS` limits it to your Tailscale login.
+**2. Keep it running.** Whistle runs as a LaunchAgent, so it starts at login and restarts if it
+crashes. Copy the example and fill in your paths and your Tailscale login. The copy stays out of git.
 
 ```sh
-cp deploy/ai.whistle.server.plist.example deploy/ai.whistle.server.plist   # once; fill in your paths and login (gitignored)
+cp deploy/ai.whistle.server.plist.example deploy/ai.whistle.server.plist
+npm run deploy     # runs the tests, then installs or restarts the LaunchAgent
 ```
+
+**3. Reach it from your phone.** `tailscale serve` gives Whistle an HTTPS address that only your
+tailnet can reach. The phone needs HTTPS to use the microphone.
 
 ```sh
-npm run deploy               # test, lint, install/restart the LaunchAgent, wait until it answers
-tail -f ~/Library/Logs/whistle.log
-tailscale serve --bg 7717    # once; `tailscale serve --https=443 off` to undo
+tailscale serve --bg 7717
 ```
 
-The phone picks up a deploy by itself: the event stream reconnects with a new app version
-(a fingerprint of `public/`), and the app reloads, or offers a Reload button if you're typing.
-Pull down on either screen to reload by hand; the home-screen app has no browser controls.
+Set `WHISTLE_ALLOWED_USERS` in the plist to your Tailscale login. Without it, anyone on your
+tailnet can drive your agents.
 
-`npm run deploy` reinstalls the LaunchAgent when `deploy/ai.whistle.server.plist` changed and
-otherwise just restarts it. It stops before restarting if tests or lint fail.
+**4. Put it on your home screen.** On the iPhone, open `https://<your-mac>.<your-tailnet>.ts.net`
+in Safari, then Share → **Add to Home Screen**. It opens full screen, like an app.
 
-UI changes in `public/` need no restart, just a reload. On the iPhone: open the URL in Safari,
-Share → Add to Home Screen.
-
-| Env | Default | |
-|---|---|---|
-| `PORT` | `7717` | |
-| `HOST` | `127.0.0.1` | keep it local; `tailscale serve` is the way in |
-| `HERDR_CONFIG_DIR` | `~/.config/herdr` | default session + `sessions/<name>/` |
-| `WHISTLE_CLAUDE_DIRS` | every `~/.claude` and `~/.claude-*` | comma-separated |
-| `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
-| `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), queued messages (`queue.json`), cached Haiku suggestions (`nextsteps.json`), screenshots from the phone (`uploads/`, cleared after a week) |
-| `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
-| `WHISTLE_VOICE` | on | `off` turns hold-to-talk off |
-| `WHISTLE_WHISPER_MODEL` | `<state dir>/models/ggml-large-v3-turbo-q5_0.bin` | |
-| `WHISTLE_WHISPER_BIN` | `whisper-cli` | |
-| `WHISTLE_CODE_DIR` | `~/Code` | where New space finds folders and makes or clones repos |
-| `WHISTLE_EXTRA_DIRS` | none | more folders to list, e.g. `work, /abs/path` (relative to the code dir) |
-| `WHISTLE_CLONE_DIRS` | none | clone an owner's repos elsewhere, e.g. `YourOrg=work` |
-| `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
-| `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
-
-## How a pane becomes a transcript
-
-`pane.process_info` gives the pane's `claude` pid. `<claude dir>/sessions/<pid>.json`
-gives its `sessionId`. The transcript is `<claude dir>/projects/*/<sessionId>.jsonl`.
-Each herdr session can use its own `CLAUDE_CONFIG_DIR`, so every `~/.claude*` folder is searched.
-
-herdr's socket takes one JSON request per connection. Agent-status subscriptions are
-per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
-
-## API
-
-| | |
-|---|---|
-| `GET /api/agents` | all agents and spaces (herdr workspaces) across sessions, plus which sessions are running |
-| `POST /api/spaces/:id/agents` | `{ "label", "prompt" }` → new tab in that space, in its agents' folder, starts Claude, sends the first prompt; `{ "id" }` |
-| `GET /api/agents/:id` | agent + parsed transcript (turns, steps, answer, files, pending question) |
-| `POST /api/agents/:id/prompt` | `{ "text": "push it" }` → `agent.prompt` |
-| `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
-| `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
-| `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
-| `POST /api/transcribe` | raw audio body (`audio/mp4` from iPhone, `audio/webm`, ≤25 MB) → `{ "text" }`, via whisper.cpp on this Mac. Empty text means nothing was said |
-| `POST /api/route` | `{ "text" }` → where something said on the home screen goes, picked by Haiku and checked against what's here: `{ kind: "space", spaceId }`, `{ kind: "folder", cwd }`, `{ kind: "init" }`, `{ kind: "clone", repo }` or `{ kind: "unsure" }`, each with `where`, `label` and `prompt` (what you said minus the routing words). Off when voice or next steps are off |
-| `POST /api/uploads` | raw image body (`content-type: image/png\|jpeg\|gif\|webp`, ≤25 MB) → `{ "path" }` on this Mac. The app adds `[Image: <path>]` lines to the prompt so the agent reads it |
-| `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed / spaces) |
-| `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
-| `GET` / `PUT /api/prefs` | the caller's settings, e.g. `{ "filter": "Work" }`, keyed by Tailscale login |
-
-Each agent carries `summary`, `lastPrompt`, `live` (current step), `question` (when blocked)
-and `suggestions` (buttons that send `text` as a prompt or `keys` as key presses).
-
-## Reply buttons
-
-Three layers, merged in this order (max 4, no repeats):
-
-1. **The agent's state** (`src/suggest.js`): question options (sent as number keys), offers
-   ("Want me to deploy it?" → **Yes, deploy it**; "push now or wait?" → one button each),
-   push when files changed and nothing was pushed, deploy once pushed.
-2. **Your wording** (`src/vocab.js`): learned from every `history.jsonl`, e.g. how you say push,
-   and how each project gets deployed ("deploy it to vercel at pace.example.com", "ship it").
-3. **Next steps from Claude Haiku 5.5** (`src/nextsteps.js`): when an agent finishes a turn, one
-   `claude -p` call (structured JSON, no tools, no session saved) reads the turn and suggests up
-   to 3 prompts in your voice. Cached per turn on disk (survives restarts; failures are retried), 2 at a time. About 2s and $0.0003 each.
-
-In the session view a model button shows the prompt it will send; long-press any button to
-edit its text before sending.
-
-## Hold to talk
-
-A space's page has a **Hold to talk** bar; each agent's composer has a mic. Hold, talk, let go.
-The phone records, `POST /api/transcribe` runs ffmpeg (to 16 kHz wav) then whisper.cpp, and the text
-goes out: in a space it starts a new agent with it as the first message; in an agent it's added
-after anything typed and sent (or queued, if the agent is working). Slide off the button to cancel.
-About 1s for a short message once the model is warm. Whisper's usual words for silence ("you",
-"Thank you.") count as nothing said.
-
-**Tap to brainstorm.** Tap any of the three mics instead of holding it and it keeps listening
-hands-free until you tap it again or press Send (Cancel throws it away). The screen stays awake
-meanwhile, since a locked phone stops the mic. What you said goes out with a note asking Claude to
-think it through with you and change nothing until you say go; in a space the new tab is named
-Brainstorm. On the home screen, a brainstorm that fits no space, folder or repo comes back as a new
-repo named for the idea ("New repo ~/Code/tide-alerts"); change the name on the card, then tap to start it.
-Two minutes of talk transcribes in about 3s; the limit is 15 minutes per step.
-
-The home screen has one too, for anything: "in whistle, make the toast stay longer", "start a new
-repo called tide tables and scaffold a node server", "clone hop and add a high score". Haiku gets
-what you said plus every space, folder in ~/Code and GitHub repo (`POST /api/route`), and a card
-says where it'll go with the message minus the routing words. A space, or a folder that gets a new
-space, starts by itself after 3 seconds unless you touch the card; a new repo or a clone waits for
-a tap. If it can't tell, the card asks you to pick a space or make a new one.
-
-Setup on the Mac, once:
+**5. Voice (optional).** Speech is turned into text on your Mac with Whisper. Nothing is sent to
+an outside service.
 
 ```sh
 brew install whisper-cpp ffmpeg
-mkdir -p ~/.config/whistle/models && curl -L -o ~/.config/whistle/models/ggml-large-v3-turbo-q5_0.bin \
+mkdir -p ~/.config/whistle/models
+curl -L -o ~/.config/whistle/models/ggml-large-v3-turbo-q5_0.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
 ```
 
-## Queue
+## Using it
 
-While an agent is working, the composer queues instead of sending, so a message never
-lands in the middle of a turn. The hub sends the first queued message once the agent is
-done or idle, then waits until it has seen the agent working again (or a minute passes)
-before sending the next. Queues are saved to `queue.json` in the state dir, wait while the
-agent asks a question, and are dropped only when the agent's pane is gone from a running
-herdr session.
+### Spaces
 
-## Questions
+The home screen shows your herdr workspaces as **spaces**. Anything **asking you** a question is
+pinned to the top. Below it, **active** spaces show what's running and what just finished. Quiet
+spaces sit at the bottom as tiles.
 
-Claude writes an AskUserQuestion to its transcript only after it is answered. While it waits,
-herdr reports `blocked` and Whistle parses the question off the screen (`src/screen.js`).
-Pressing the option's number answers it, so a tap sends that one key.
+- Tap a space to see its agents. **+ New agent** opens a new Claude tab there.
+- The **+** at the top makes a new space from a folder in `~/Code`, a new repo, or a GitHub clone.
+- Long-press a space to hide it from home or delete it.
+- The chips under the title filter by herdr session.
 
-`:id` is `<session>/<pane>`, URL-encoded, e.g. `default%2FwY%3Ap1`.
+<img src="docs/images/space.png" width="250" alt="A space with a working agent and a finished one" align="right">
+
+### Agents
+
+Each card shows the agent's status. **Working** shows the step it's on, **New** means it has
+finished and you haven't looked yet, and **Asking** means it's waiting on you.
+
+- **Reply buttons** send a whole message with one tap: *Push it*, *Deploy*, the options in an offer
+  like "Want me to deploy it?", and next steps Claude Haiku suggests in your own words.
+  Long-press a button to edit its text before it goes.
+- **Swipe a card right** to send its first button, or **left** to mark it done.
+- **Stop** interrupts a working agent. Tap it twice, so a stray tap can't stop one.
+- **Queue:** typing to a working agent doesn't interrupt it. The message waits and goes out when
+  the agent finishes its turn.
+
+<br clear="right">
+
+### Conversations
+
+Tap an agent to read its conversation: your messages, a strip showing each step it took, its
+answer, and the last changes it made.
+
+- **Tap a paragraph** of an answer to push back on it, ask for that part to be redone, or ask why.
+- **Questions** show up as buttons. Tap one to answer. When an agent asks several questions at
+  once, you'll see each one in turn, then a final Submit.
+- **Screenshots:** the picture button attaches images from your phone, and the agent reads them.
+- **New session** clears the conversation (`/clear`), and asks you first.
+
+### Talking
+
+There's a mic on the home screen, at the bottom of every space, and next to every message box.
+
+| | Hold | Tap |
+|---|---|---|
+| | Talk, let go, it sends. Slide off to cancel. | Talks hands-free until you tap again or press Send. For thinking out loud. |
+| **Home** | Say what *and where*: "in the blog, add an RSS feed." A card shows where it'll go. | A brainstorm that fits none of your projects is offered as a **new repo** named for the idea. |
+| **Space** | Starts a new agent in that space. | Starts a "Brainstorm" agent there. |
+| **Agent** | Sends to that agent, after anything you typed. | Sends your brainstorm to that agent. |
+
+A brainstorm goes out with a note asking Claude to think it through with you, ask questions, and
+change nothing until you say go.
+
+<table>
+  <tr>
+    <td><img src="docs/images/brainstorm.png" width="250" alt="Brainstorming hands-free"></td>
+    <td><img src="docs/images/route.png" width="250" alt="A brainstorm becomes a new repo"></td>
+  </tr>
+  <tr>
+    <td align="center">Tap to brainstorm</td>
+    <td align="center">An idea becomes a new repo</td>
+  </tr>
+</table>
+
+### Staying current
+
+The app updates live as your agents work. After `npm run deploy` the phone reloads itself, or
+offers a Reload button if you're in the middle of typing. Pull down on any screen to reload by hand.
+
+## Settings
+
+Set these in the plist's `EnvironmentVariables`. The full list is in
+[docs/how-it-works.md](docs/how-it-works.md#settings).
+
+| | |
+|---|---|
+| `WHISTLE_ALLOWED_USERS` | Tailscale logins allowed in (comma-separated). Set this. |
+| `WHISTLE_CODE_DIR` | Where New space looks for folders and puts new repos. Default `~/Code`. |
+| `WHISTLE_CLAUDE_CONFIG_DIR` | Which Claude login to use for reply suggestions and routing. |
+| `WHISTLE_NEXT_STEPS=off` | Turns off the Haiku suggestions (and routing from the home mic). |
+| `WHISTLE_VOICE=off` | Turns off the mics. |
+
+## How it works
+
+Whistle reads each herdr session's socket to list agents, finds each Claude pane's transcript on
+disk, and reads questions off the screen while an agent waits. It sends your replies back as
+prompts and key presses through herdr. Details, the API and notes for hacking on it are in
+[docs/how-it-works.md](docs/how-it-works.md).
