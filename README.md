@@ -70,6 +70,7 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 | `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
 | `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
 | `POST /api/transcribe` | raw audio body (`audio/mp4` from iPhone, `audio/webm`, ≤25 MB) → `{ "text" }`, via whisper.cpp on this Mac. Empty text means nothing was said |
+| `POST /api/route` | `{ "text" }` → where something said on the home screen goes, picked by Haiku and checked against what's here: `{ kind: "space", spaceId }`, `{ kind: "folder", cwd }`, `{ kind: "init" }`, `{ kind: "clone", repo }` or `{ kind: "unsure" }`, each with `where`, `label` and `prompt` (what you said minus the routing words). Off when voice or next steps are off |
 | `POST /api/uploads` | raw image body (`content-type: image/png\|jpeg\|gif\|webp`, ≤25 MB) → `{ "path" }` on this Mac. The app adds `[Image: <path>]` lines to the prompt so the agent reads it |
 | `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed / spaces) |
 | `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
@@ -102,6 +103,13 @@ goes out: in a space it starts a new agent with it as the first message; in an a
 after anything typed and sent (or queued, if the agent is working). Slide off the button to cancel.
 About 1s for a short message once the model is warm. Whisper's usual words for silence ("you",
 "Thank you.") count as nothing said.
+
+The home screen has one too, for anything: "in whistle, make the toast stay longer", "start a new
+repo called tide tables and scaffold a node server", "clone hop and add a high score". Haiku gets
+what you said plus every space, folder in ~/Code and GitHub repo (`POST /api/route`), and a card
+says where it'll go with the message minus the routing words. A space, or a folder that gets a new
+space, starts by itself after 3 seconds unless you touch the card; a new repo or a clone waits for
+a tap. If it can't tell, the card asks you to pick a space or make a new one.
 
 Setup on the Mac, once:
 

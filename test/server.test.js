@@ -273,3 +273,22 @@ test('POST /api/transcribe maps bad audio to 400', async () => {
     assert.equal(r.status, 400);
   } finally { s.close(); }
 });
+
+test('POST /api/route says where spoken words should go, 503 when routing is off', async () => {
+  const seen = [];
+  const router = { async route(text) { seen.push(text); return { kind: 'space', spaceId: 'default/w1', where: 'proj', label: '', prompt: 'fix it' }; } };
+  const s = createServer({ hub: new FakeHub(), router, log: () => {} });
+  await new Promise(r => s.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${s.address().port}/api/route`;
+  const postTo = body => fetch(at, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  try {
+    const r = await postTo({ text: 'in proj fix it' });
+    assert.equal(r.status, 200);
+    assert.equal((await r.json()).spaceId, 'default/w1');
+    assert.deepEqual(seen, ['in proj fix it']);
+    assert.equal((await postTo({ text: '  ' })).status, 400);
+  } finally { s.close(); }
+  const off = await post('/api/route', { text: 'fix it' });
+  assert.equal(off.status, 503);
+  assert.equal((await off.json()).error.code, 'route_off');
+});

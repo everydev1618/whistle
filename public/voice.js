@@ -16,3 +16,18 @@ export function spokenDraft(typed, spoken) {
   if (!typed.trim()) return spoken;
   return /\s$/.test(typed) ? typed + spoken : `${typed} ${spoken}`;
 }
+
+// The card that says where something said on the home screen will go.
+export function routeTitle(r) {
+  switch (r.kind) {
+    case 'space': return `New agent in ${r.where}`;
+    case 'folder': return `New space in ~/Code/${r.where}`;
+    case 'init': return `New repo ~/Code/${r.where}`;
+    case 'clone': return `Clone ${r.where}`;
+    default: return 'Where should this go?';
+  }
+}
+
+// Picking the wrong space costs nothing; making folders on the Mac waits for a tap.
+export const autoGo = r => r.kind === 'space' || r.kind === 'folder';
+export const AUTO_GO_MS = 3000;

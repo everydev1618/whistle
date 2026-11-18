@@ -12,6 +12,7 @@ import { Queue } from './queue.js';
 import { Uploads } from './uploads.js';
 import { Folders } from './folders.js';
 import { Transcriber } from './transcribe.js';
+import { Router, ROUTE_SYSTEM, ROUTE_SCHEMA } from './route.js';
 
 const home = os.homedir();
 const herdrDir = process.env.HERDR_CONFIG_DIR || path.join(home, '.config', 'herdr');
@@ -40,6 +41,12 @@ const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: 
 setInterval(() => { hub.vocab = loadVocab(claudeDir); }, 10 * 60 * 1000).unref();
 hub.start();
 
-createServer({ hub, folders, allowedUsers, prefs: new Prefs(path.join(stateDir, 'prefs.json')), marks: new Marks(path.join(stateDir, 'marks.json')), uploads: new Uploads(path.join(stateDir, 'uploads')), transcriber }).listen(port, host, () => {
+// The home-screen mic asks Haiku where what you said should go. Off with voice or next steps.
+const router = !transcriber || process.env.WHISTLE_NEXT_STEPS === 'off' ? null : new Router({
+  hub, folders,
+  run: prompt => runClaude(prompt, { bin: process.env.WHISTLE_CLAUDE_BIN || 'claude', configDir: process.env.WHISTLE_CLAUDE_CONFIG_DIR, system: ROUTE_SYSTEM, schema: ROUTE_SCHEMA, timeoutMs: 30000 }),
+});
+
+createServer({ hub, folders, allowedUsers, prefs: new Prefs(path.join(stateDir, 'prefs.json')), marks: new Marks(path.join(stateDir, 'marks.json')), uploads: new Uploads(path.join(stateDir, 'uploads')), transcriber, router }).listen(port, host, () => {
   console.log(`whistle on http://${host}:${port}  herdr=${herdrDir}  claude=${claudeDir}  users=${allowedUsers.join(',') || 'any'}  next-steps=${nextSteps ? 'on' : 'off'}`);
 });

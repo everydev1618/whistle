@@ -1,7 +1,7 @@
 import { mdBlocks } from './md.js';
 import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents, arrangeSpaces } from './herd.js';
 import { withImages } from './attach.js';
-import { recordingType, releaseOutcome, spokenDraft, CANCEL_PX } from './voice.js';
+import { recordingType, releaseOutcome, spokenDraft, routeTitle, autoGo, AUTO_GO_MS, CANCEL_PX } from './voice.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -435,6 +435,100 @@ function deleteSpace(sp, mine) {
   });
 }
 
+// Something said into the home-screen mic: Haiku on the Mac picks where it goes,
+// this card shows it. Safe places start by themselves after a moment unless you touch the card.
+function routeSheet(said) {
+  closeSheet();
+  const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
+  const sheet = Object.assign(document.createElement('form'), { className: 'sheet make route' });
+  sheet.innerHTML = `<b class="ct" id="rt-title">Working out where that goes…</b>
+    <p class="note" id="rt-sub"></p>
+    <textarea id="rt-prompt" aria-label="Message">${esc(said)}</textarea>
+    <div class="else" id="rt-else" hidden>
+      <input id="rt-find" type="search" placeholder="Find a space" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="picks" id="rt-picks"></div>
+      <button type="button" id="rt-newspace">New space…</button>
+    </div>
+    <button class="go" type="submit" disabled>Start Claude</button>
+    <button type="button" id="rt-other">Somewhere else</button>
+    <button type="button" data-cancel>Cancel</button>`;
+  const go = $('.go', sheet), title = $('#rt-title', sheet), sub = $('#rt-sub', sheet), text = $('#rt-prompt', sheet);
+  let route = null, timer = null, closed = false;
+  const close = () => { closed = true; stopCountdown(); closeSheet(); };
+  scrim.onclick = close;
+  $('[data-cancel]', sheet).onclick = close;
+
+  const stopCountdown = () => { clearInterval(timer); timer = null; if (route) go.textContent = 'Start Claude'; };
+  const countdown = () => {
+    const end = Date.now() + AUTO_GO_MS;
+    const tickGo = () => {
+      const left = Math.ceil((end - Date.now()) / 1000);
+      if (left <= 0) { stopCountdown(); sheet.requestSubmit(); } else go.textContent = `Start Claude · ${left}`;
+    };
+    tickGo();
+    timer = setInterval(tickGo, 200);
+  };
+  // Touching the card means you want a look first.
+  ['pointerdown', 'focusin', 'input'].forEach(ev => sheet.addEventListener(ev, e => { if (e.target !== go) stopCountdown(); }));
+
+  const show = r => {
+    route = r;
+    title.textContent = routeTitle(r);
+    sub.hidden = !(r.kind === 'init' || r.kind === 'clone');
+    sub.textContent = r.kind === 'init' ? 'Makes the folder and runs git init.' : r.kind === 'clone' ? 'Clones it into ~/Code first.' : '';
+    text.value = r.prompt;
+    go.disabled = r.kind === 'unsure';
+    go.textContent = 'Start Claude';
+    if (r.kind === 'unsure') showElse();
+    else if (autoGo(r)) countdown();
+  };
+
+  const showElse = () => {
+    stopCountdown();
+    $('#rt-else', sheet).hidden = false;
+    $('#rt-other', sheet).hidden = true;
+    drawPicks();
+  };
+  const drawPicks = () => {
+    const q = $('#rt-find', sheet).value.trim().toLowerCase();
+    const many = state.sessions.length > 1;
+    const hits = [...state.spaces].filter(sp => !q || sp.label.toLowerCase().includes(q)).sort((a, b) => a.label.localeCompare(b.label));
+    $('#rt-picks', sheet).innerHTML = hits.map(sp => `<button type="button" data-space="${esc(sp.id)}" class="${route?.spaceId === sp.id ? 'on' : ''}"><span>${esc(sp.label)}</span>${many ? `<small>${esc(sp.session)}</small>` : ''}</button>`).join('') || '<p class="note">No spaces match.</p>';
+  };
+  $('#rt-other', sheet).onclick = showElse;
+  $('#rt-find', sheet).oninput = drawPicks;
+  $('#rt-picks', sheet).onclick = e => {
+    const b = e.target.closest('[data-space]');
+    if (!b) return;
+    const sp = state.spaces.find(x => x.id === b.dataset.space);
+    show({ kind: 'space', spaceId: sp.id, where: sp.label, label: route?.kind === 'space' ? route.label : '', prompt: text.value });
+    stopCountdown();
+    drawPicks();
+  };
+  $('#rt-newspace', sheet).onclick = () => { const p = text.value; close(); newSpaceSheet({ prompt: p }); };
+
+  sheet.onsubmit = async e => {
+    e.preventDefault();
+    if (!route || route.kind === 'unsure' || go.disabled) return;
+    stopCountdown();
+    const prompt = text.value;
+    go.disabled = true;
+    go.textContent = route.kind === 'clone' ? 'Cloning…' : 'Starting Claude…';
+    try {
+      if (route.kind === 'space') await startAgent(route.spaceId, route.label, prompt, close);
+      else await startSpace({ label: route.label, prompt, ...(route.kind === 'folder' ? { cwd: route.cwd } : route.kind === 'init' ? { init: true } : { clone: route.repo }) }, close);
+    } catch {
+      go.disabled = false;
+      go.textContent = 'Start Claude';
+    }
+  };
+
+  document.body.append(scrim, sheet);
+  api('/api/route', { text: said })
+    .then(r => { if (!closed) show(r); })
+    .catch(err => { if (!closed) { show({ kind: 'unsure', label: '', prompt: said }); toast(`Couldn't pick a place: ${err.message}`, null, 4000); } });
+}
+
 // Claude stopped on a question while starting (often "trust this folder?").
 const startupNote = prompt => `Claude is asking something first.${prompt?.trim() ? ' Your message goes once you answer.' : ''}`;
 
@@ -442,10 +536,31 @@ const startupNote = prompt => `Claude is asking something first.${prompt?.trim()
 const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const tilde = p => p.replace(/^\/Users\/[^/]+/, '~');
 
-function newSpaceSheet() {
+// New spaces go to the filtered session, else default, else the first one running.
+function defaultSession() {
+  const running = state.sessions.filter(s => s.running);
+  return activeFilter() !== 'all' ? activeFilter() : running.some(s => s.name === 'default') ? 'default' : running[0]?.name || '';
+}
+
+// A new space with Claude in it, opened once herdr reports it. Throws after telling you why.
+async function startSpace(body, started = () => {}) {
+  try {
+    const { id, waiting } = await api('/api/spaces', { session: defaultSession(), ...body });
+    started();
+    if (waiting) toast(startupNote(body.prompt), null, 6000);
+    else if (body.prompt?.trim()) showPending(id, body.prompt.trim());
+    for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
+    location.hash = `a=${encodeURIComponent(id)}`;
+  } catch (err) {
+    toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new space. Open it in herdr.' : `Not created: ${err.message}`, null, 5000);
+    throw err;
+  }
+}
+
+function newSpaceSheet({ prompt = '' } = {}) {
   closeSheet();
   const running = state.sessions.filter(s => s.running);
-  const pick = activeFilter() !== 'all' ? activeFilter() : running.some(s => s.name === 'default') ? 'default' : running[0]?.name;
+  const pick = defaultSession();
   const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
   const sheet = Object.assign(document.createElement('form'), { className: 'sheet make' });
   sheet.innerHTML = `<b class="ct">New space</b>
@@ -462,7 +577,7 @@ function newSpaceSheet() {
     <p class="note" id="ns-note" hidden></p>
     ${running.length > 1 ? `<label for="ns-session">herdr session</label><select id="ns-session">${running.map(s => `<option${s.name === pick ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : ''}
     <label for="ns-prompt">First message</label>
-    <textarea id="ns-prompt" placeholder="What should Claude work on? Leave empty to just start it."></textarea>
+    <textarea id="ns-prompt" placeholder="What should Claude work on? Leave empty to just start it.">${esc(prompt)}</textarea>
     <button class="go" type="submit">Create and start Claude</button>
     <button type="button" data-cancel>Cancel</button>`;
   scrim.onclick = closeSheet;
@@ -527,16 +642,10 @@ function newSpaceSheet() {
     go.disabled = true;
     go.textContent = mode === 'clone' && !repos?.find(r => r.full === chosen)?.local ? 'Cloning…' : 'Starting Claude…';
     try {
-      const prompt = $('#ns-prompt').value;
-      const { id, waiting } = await api('/api/spaces', { session: $('#ns-session')?.value || pick || '', label: name.value, prompt, ...where });
-      closeSheet();
-      if (waiting) toast(startupNote(prompt), null, 6000);
-      for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
-      location.hash = `a=${encodeURIComponent(id)}`;
-    } catch (err) {
+      await startSpace({ session: $('#ns-session')?.value || pick, label: name.value, prompt: $('#ns-prompt').value, ...where }, closeSheet);
+    } catch {
       go.disabled = false;
       go.textContent = 'Create and start Claude';
-      toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new space. Open it in herdr.' : `Not created: ${err.message}`, null, 5000);
     }
   };
   document.body.append(scrim, sheet);
@@ -1077,6 +1186,8 @@ function holdToTalk(btn, onText) {
   btn.addEventListener('pointercancel', release);
 }
 
+// On the home screen: Haiku picks the space, folder or repo; the card confirms it.
+holdToTalk($('#home-mic'), text => routeSheet(text));
 // In a space: what you said starts a new agent there.
 holdToTalk($('#sp-mic'), text => startAgent(state.spaceId, '', text).catch(() => {}));
 // In an agent: it goes in the composer after anything typed, and sends (or queues).

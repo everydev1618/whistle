@@ -47,9 +47,10 @@ export function cleanSuggestions(out) {
     .map(s => ({ label: clip(s.label.trim(), 26), text: clip(s.text.trim(), 300) }));
 }
 
-export function runClaude(prompt, { bin = 'claude', model = MODEL, configDir, timeoutMs = 60000 } = {}) {
+// One structured answer from Haiku. The system prompt and schema default to next steps.
+export function runClaude(prompt, { bin = 'claude', model = MODEL, configDir, timeoutMs = 60000, system = SYSTEM, schema = SCHEMA } = {}) {
   const args = ['-p', '--model', model, '--no-session-persistence', '--tools', '', '--setting-sources', '',
-    '--system-prompt', SYSTEM, '--output-format', 'json', '--json-schema', SCHEMA];
+    '--system-prompt', system, '--output-format', 'json', '--json-schema', schema];
   const env = { ...process.env, ...(configDir ? { CLAUDE_CONFIG_DIR: configDir } : {}) };
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'], timeout: timeoutMs });
