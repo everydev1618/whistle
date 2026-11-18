@@ -506,7 +506,7 @@ function routeSheet(said, { brainstorm = false } = {}) {
     stopCountdown();
     drawPicks();
   };
-  $('#rt-newspace', sheet).onclick = () => { const p = text.value; close(); newSpaceSheet({ prompt: p }); };
+  $('#rt-newspace', sheet).onclick = () => { const p = brainstorm ? brainstormPrompt(text.value) : text.value; close(); newSpaceSheet({ prompt: p }); };
 
   sheet.onsubmit = async e => {
     e.preventDefault();
