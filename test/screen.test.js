@@ -58,3 +58,18 @@ test('a long folder path is shortened to its last parts', () => {
   const long = trust.replace('/Users/me/Code/new-project', '/private/tmp/a/very/deep/scratch/untrusted');
   assert.match(parseQuestionScreen(long).question, /^…\/scratch\/untrusted · /);
 });
+
+test('on the second of several questions, the header is the one being asked', () => {
+  const q = parseQuestionScreen(fs.readFileSync(new URL('./fixtures/question-second-screen.txt', import.meta.url), 'utf8'));
+  assert.equal(q.header, 'Fruit');
+  assert.equal(q.question, 'Which fruit?');
+  assert.deepEqual(q.options.map(o => [o.label, o.keys]), [['Apple', ['1']], ['Pear', ['2']]]);
+});
+
+test('after the last question, the review screen asks to submit the answers', () => {
+  // This screen has no "Enter to select" footer.
+  const q = parseQuestionScreen(fs.readFileSync(new URL('./fixtures/question-review-screen.txt', import.meta.url), 'utf8'));
+  assert.equal(q.header, 'Submit your answers?');
+  assert.equal(q.question, 'Which color? → Red · Which fruit? → Apple');
+  assert.deepEqual(q.options.map(o => [o.label, o.keys]), [['Submit answers', ['1']], ['Cancel', ['2']]]);
+});

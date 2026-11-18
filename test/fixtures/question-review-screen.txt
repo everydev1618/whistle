@@ -1,0 +1,11 @@
+←  ☒ Color  ☒ Fruit  ✔ Submit  →
+
+Review your answers
+
+ ● Which color?
+   → Red
+ ● Which fruit?
+   → Apple
+
+❯ 1. Submit answers
+  2. Cancel

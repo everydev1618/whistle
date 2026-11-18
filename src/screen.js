@@ -15,6 +15,19 @@
 //
 // Enter to select · ↑/↓ to navigate · Esc to cancel
 
+// With several questions there is a tab bar, and after the last one a review screen
+// with no footer at all:
+//
+// ←  ☒ Color  ☒ Fruit  ✔ Submit  →
+//
+// Review your answers
+//
+//  ● Which color?
+//    → Red
+//
+// ❯ 1. Submit answers
+//   2. Cancel
+
 // Some menus (like Claude's "trust this folder?" at startup) have no numbers,
 // just a ❯ cursor, and are answered by moving it with arrows and pressing Enter.
 //
@@ -30,15 +43,26 @@ const FOOTER = /Enter to (?:select|confirm)/;
 const OPTION = /^\s*(?:❯\s*)?(\d+)\.\s+(.+?)\s*$/;
 const HEADER = /^\s*(?:←\s*)?[☐☒✔]\s+(.+?)\s*(?:☐|✔|→|$)/;
 const BUILTIN = /^(Type something\.?|Chat about this)$/;
+const TAB = /([☐☒✔])\s+(.+?)(?=\s+[☐☒✔→]|\s*$)/g;
+const REVIEW = /^\s*Review your answers\s*$/;
+
+// The question being asked: the first one not answered yet, if the line is a tab bar.
+function headerOf(line) {
+  const tabs = [...line.matchAll(TAB)].map(m => ({ mark: m[1], name: m[2].trim() }));
+  if (tabs.length < 2) return line.match(HEADER)[1].trim();
+  return (tabs.find(t => t.mark === '☐') ?? tabs[0]).name;
+}
 
 export function parseQuestionScreen(text) {
   const lines = (text || '').split('\n');
   const footer = lines.findLastIndex(l => FOOTER.test(l));
+  const review = lines.findLastIndex(l => REVIEW.test(l));
+  if (review > footer) return reviewScreen(lines.slice(review + 1));
   if (footer < 0) return null;
   const headerAt = lines.slice(0, footer).findLastIndex(l => HEADER.test(l));
   if (headerAt < 0) return arrowMenu(lines, footer);
 
-  const header = lines[headerAt].match(HEADER)[1].trim();
+  const header = headerOf(lines[headerAt]);
   const question = [];
   const options = [];
   let i = headerAt + 1;
@@ -54,6 +78,20 @@ export function parseQuestionScreen(text) {
   const real = options.filter(o => !BUILTIN.test(o.label));
   if (!real.length) return null;
   return { header, question: question.join(' '), options: real };
+}
+
+function reviewScreen(lines) {
+  const asked = [];
+  const options = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    const opt = raw.match(OPTION);
+    if (opt) options.push({ n: Number(opt[1]), label: opt[2], description: '', keys: [opt[1]] });
+    else if (line.startsWith('●')) asked.push(line.slice(1).trim());
+    else if (line.startsWith('→') && asked.length) asked[asked.length - 1] += ` ${line}`;
+  }
+  if (!options.length) return null;
+  return { header: 'Submit your answers?', question: asked.join(' · '), options };
 }
 
 function arrowMenu(lines, footer) {

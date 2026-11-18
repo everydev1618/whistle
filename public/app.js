@@ -703,6 +703,9 @@ function renderSession() {
     html += `<div class="ask"><div class="ctx">Waiting on you · ${esc(a.question.header)}</div><div class="qq">${esc(a.question.question)}</div>
       ${a.question.options.map(o => `<button data-keys="${esc(JSON.stringify(o.keys ?? [String(o.n)]))}"><b>${esc(o.label)}</b>${o.description ? `<span>${esc(o.description)}</span>` : ''}</button>`).join('')}</div>`;
   }
+  else if (a.status === 'blocked') {
+    html += `<div class="ask"><div class="ctx">Waiting on you</div><div class="qq">Claude is asking something Whistle can't read. Answer it in herdr. Dismiss (Esc) cancels it.</div></div>`;
+  }
   $('#s-body').innerHTML = html;
 
   const chips = a.question ? [] : [...a.suggestions];
