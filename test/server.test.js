@@ -246,3 +246,30 @@ test('DELETE /api/spaces/:id closes the space', async () => {
   assert.deepEqual(hub.sent.at(-1), ['close', 'default/w1']);
   assert.equal((await del('default/w7')).status, 404);
 });
+
+test('POST /api/transcribe turns audio into text, 503 when voice is off', async () => {
+  const seen = [];
+  const transcriber = { async transcribe(buf, type) { seen.push([buf.toString(), type]); return 'Ship it.'; } };
+  const s = createServer({ hub: new FakeHub(), transcriber, log: () => {} });
+  await new Promise(r => s.listen(0, '127.0.0.1', r));
+  const at = `http://127.0.0.1:${s.address().port}/api/transcribe`;
+  try {
+    const r = await fetch(at, { method: 'POST', headers: { 'content-type': 'audio/mp4' }, body: 'aac' });
+    assert.equal(r.status, 200);
+    assert.deepEqual(await r.json(), { text: 'Ship it.' });
+    assert.deepEqual(seen, [['aac', 'audio/mp4']]);
+  } finally { s.close(); }
+  const off = await fetch(base + '/api/transcribe', { method: 'POST', headers: { 'content-type': 'audio/mp4' }, body: 'aac' });
+  assert.equal(off.status, 503);
+  assert.equal((await off.json()).error.code, 'voice_off');
+});
+
+test('POST /api/transcribe maps bad audio to 400', async () => {
+  const transcriber = { async transcribe() { throw new HerdrError('bad_audio', 'Send audio.'); } };
+  const s = createServer({ hub: new FakeHub(), transcriber, log: () => {} });
+  await new Promise(r => s.listen(0, '127.0.0.1', r));
+  try {
+    const r = await fetch(`http://127.0.0.1:${s.address().port}/api/transcribe`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x' });
+    assert.equal(r.status, 400);
+  } finally { s.close(); }
+});

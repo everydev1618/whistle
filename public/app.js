@@ -1,6 +1,7 @@
 import { mdBlocks } from './md.js';
 import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents, arrangeSpaces } from './herd.js';
 import { withImages } from './attach.js';
+import { recordingType, releaseOutcome, spokenDraft, CANCEL_PX } from './voice.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -126,7 +127,7 @@ function updateReady() {
   if (safeToReload()) location.reload();
   else toast('Whistle was updated', { label: 'Reload', run: () => location.reload() }, 60_000);
 }
-const safeToReload = () => !$('#draft').value.trim() && !attached.length && document.activeElement?.id !== 'draft' && !document.querySelector('.sheet:not([hidden])');
+const safeToReload = () => $('#rec').hidden && !$('#draft').value.trim() && !attached.length && document.activeElement?.id !== 'draft' && !document.querySelector('.sheet:not([hidden])');
 
 // The home-screen app has no browser pull-to-refresh, so do it here.
 function pullToRefresh(scroller) {
@@ -365,21 +366,30 @@ function newAgentSheet(spaceId) {
     go.disabled = true;
     go.textContent = 'Starting Claude…';
     try {
-      const prompt = $('#na-prompt').value;
-      const { id, waiting } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/agents`, { label: $('#na-label').value, prompt });
-      closeSheet();
-      if (waiting) toast(startupNote(prompt), null, 6000);
-      // The new pane shows up on the next poll; open it once it's here.
-      for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
-      location.hash = `a=${encodeURIComponent(id)}`;
-    } catch (err) {
+      await startAgent(spaceId, $('#na-label').value, $('#na-prompt').value, closeSheet);
+    } catch {
       go.disabled = false;
       go.textContent = 'Start Claude';
-      toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new tab. Open it in herdr.' : `Not started: ${err.message}`, null, 5000);
     }
   };
   document.body.append(scrim, sheet);
   $('#na-label').focus();
+}
+
+// A new Claude tab in the space, opened once herdr reports it. Throws after telling you why.
+async function startAgent(spaceId, label, prompt, started = () => {}) {
+  try {
+    const { id, waiting } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/agents`, { label, prompt });
+    started();
+    if (waiting) toast(startupNote(prompt), null, 6000);
+    else if (prompt.trim()) showPending(id, prompt.trim());
+    // The new pane shows up on the next poll; open it once it's here.
+    for (let i = 0; i < 20 && !state.agents.has(id); i++) await new Promise(r => setTimeout(r, 250));
+    location.hash = `a=${encodeURIComponent(id)}`;
+  } catch (err) {
+    toast(err.code === 'agent_not_ready' ? 'Claude is waiting on something in the new tab. Open it in herdr.' : `Not started: ${err.message}`, null, 5000);
+    throw err;
+  }
 }
 
 // Long-press a space: hide it from home (Whistle only) or delete it in herdr.
@@ -974,6 +984,103 @@ $('#composer').addEventListener('submit', async e => {
     renderAttached();
     toast(err.code === 'agent_blocked' ? 'It is waiting on a question. Answer it first.' : `Not sent: ${err.message}`);
   }
+});
+
+// ---------- hold to talk ----------
+// Hold the mic and talk; let go to send, slide away to throw it away.
+// The phone records, whisper on the Mac turns it into text, then `onText` decides where it goes.
+function holdToTalk(btn, onText) {
+  let pressing = false, busy = false, rec = null, stream = null, chunks = [], t0 = 0, x0 = 0, y0 = 0, tick = null;
+  const panel = $('#rec');
+  const show = (cls, title, sub) => {
+    panel.hidden = false;
+    panel.className = `rec ${cls}`;
+    panel.style.bottom = `${(btn.closest('footer')?.offsetHeight ?? 80) + 14}px`; // just above the bar it came from
+    $('#rec-t').textContent = title;
+    $('#rec-s').textContent = sub;
+    btn.classList.toggle('on', cls === 'on');
+    btn.classList.toggle('away', cls === 'away');
+    btn.classList.toggle('busy', cls === 'busy');
+  };
+  const reset = () => {
+    clearInterval(tick);
+    stream?.getTracks().forEach(t => t.stop());
+    stream = rec = null;
+    panel.hidden = true;
+    btn.classList.remove('on', 'away', 'busy');
+  };
+  const clock = () => { const s = Math.floor((Date.now() - t0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+  btn.addEventListener('pointerdown', async e => {
+    e.preventDefault();
+    if (pressing || busy || rec) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record audio.');
+    pressing = true;
+    x0 = e.clientX; y0 = e.clientY;
+    btn.setPointerCapture?.(e.pointerId);
+    show('on', 'Listening…', 'Slide away to cancel');
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      pressing = false;
+      reset();
+      return toast('Whistle needs the microphone. Allow it in Settings › Safari › Microphone.', null, 5000);
+    }
+    if (!pressing) return reset(); // let go while the permission prompt was up
+    const type = recordingType(t => MediaRecorder.isTypeSupported(t));
+    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    chunks = [];
+    rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+    rec.start();
+    t0 = Date.now();
+    navigator.vibrate?.(10);
+    tick = setInterval(() => { if (btn.classList.contains('on')) $('#rec-t').textContent = `Listening… ${clock()}`; }, 250);
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!pressing || !rec) return;
+    const away = Math.hypot(e.clientX - x0, e.clientY - y0) > CANCEL_PX;
+    if (away !== btn.classList.contains('away')) show(away ? 'away' : 'on', away ? 'Let go to cancel' : `Listening… ${clock()}`, away ? 'Slide back to keep it' : 'Slide away to cancel');
+  });
+  const release = e => {
+    if (!pressing) return;
+    pressing = false;
+    if (!rec) return; // still waiting on the microphone; reset happens there
+    const r = rec;
+    const outcome = e.type === 'pointercancel' ? 'cancel' : releaseOutcome({ ms: Date.now() - t0, dx: e.clientX - x0, dy: e.clientY - y0 });
+    clearInterval(tick);
+    r.onstop = async () => {
+      const blob = new Blob(chunks, { type: r.mimeType || 'audio/mp4' });
+      reset();
+      if (outcome === 'short') return toast('Hold the mic while you talk.');
+      if (outcome === 'cancel') return;
+      busy = true;
+      show('busy', 'Transcribing…', 'One moment');
+      try {
+        const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+        reset();
+        if (!data.text) toast("Didn't catch that. Try again a little closer.");
+        else await onText(data.text);
+      } catch (err) {
+        reset();
+        toast(`Not transcribed: ${err.message}`, null, 5000);
+      } finally { busy = false; }
+    };
+    r.stop();
+  };
+  btn.addEventListener('pointerup', release);
+  btn.addEventListener('pointercancel', release);
+}
+
+// In a space: what you said starts a new agent there.
+holdToTalk($('#sp-mic'), text => startAgent(state.spaceId, '', text).catch(() => {}));
+// In an agent: it goes in the composer after anything typed, and sends (or queues).
+holdToTalk($('#mic'), text => {
+  draft.value = spokenDraft(draft.value, text);
+  grow(draft);
+  $('#composer').requestSubmit();
 });
 
 setInterval(() => { if (!state.openId) render(); }, 30_000); // keep "5m ago" fresh

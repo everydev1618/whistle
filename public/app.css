@@ -3,7 +3,7 @@
   --accent: #2b50e6; --accent-ink: #ffffff; --accent-soft: #e2e8fd;
   --done: #157a4a; --done-soft: #ddf2e7; --blocked: #b45c00; --blocked-soft: #fbead5;
   --working: #2b50e6; --working-soft: #e2e8fd; --idle: #6c7886; --idle-soft: #e8ecf0;
-  --add: #dff3e6; --add-ink: #11603a; --del: #fbe3e1; --del-ink: #9b2a1f;
+  --rec: #d9342b; --add: #dff3e6; --add-ink: #11603a; --del: #fbe3e1; --del-ink: #9b2a1f;
   --f-ui: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --top: env(safe-area-inset-top, 0px); --bottom: env(safe-area-inset-bottom, 0px);
@@ -16,7 +16,7 @@
   --accent: #7d97ff; --accent-ink: #0b1117; --accent-soft: #1c2747;
   --done: #4fd08f; --done-soft: #12301f; --blocked: #f2a54a; --blocked-soft: #3a2810;
   --working: #7d97ff; --working-soft: #1c2747; --idle: #8a97a5; --idle-soft: #1b242d;
-  --add: #12301f; --add-ink: #7fe0ab; --del: #3a1714; --del-ink: #ff9a8d;
+  --rec: #ff6b5e; --add: #12301f; --add-ink: #7fe0ab; --del: #3a1714; --del-ink: #ff9a8d;
   color-scheme: dark } }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent }
@@ -268,3 +268,22 @@ button:active, .chip:active, .tile:active, .wide:active, .rest:active, .card .op
   .view, .sheet, .scrim, .toast, .you.pending, .card.sent { animation: none !important }
   .card, button, .chip, .tile, .wide, .rest { transition: none }
 }
+
+/* hold to talk */
+.holdtalk, .ic.mic { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none }
+.talk { flex: none; padding: 10px var(--gutter-r) calc(12px + var(--bottom)) var(--gutter-l); border-top: 1px solid var(--line); background: var(--bg) }
+.holdtalk { width: 100%; height: 54px; border: none; border-radius: 27px; background: var(--accent); color: var(--accent-ink); display: flex; gap: 8px; align-items: center; justify-content: center; font-weight: 700; font-size: 16px; transition: transform .18s var(--spring), background .15s }
+.holdtalk svg { width: 22px; height: 22px }
+.ic.mic { color: var(--ink); transition: transform .18s var(--spring), background .15s }
+.holdtalk.on, .ic.mic.on { background: var(--rec); border-color: var(--rec); color: #fff; transform: scale(1.03) }
+.ic.mic.on { transform: scale(1.25) }
+.holdtalk.away, .ic.mic.away { background: var(--idle); border-color: var(--idle); transform: none }
+.holdtalk.busy, .ic.mic.busy { opacity: .55 }
+.rec { position: fixed; left: 50%; bottom: calc(110px + var(--bottom)); transform: translateX(-50%); z-index: 30; display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center; padding: 12px 18px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); box-shadow: 0 8px 30px rgba(0,0,0,.18); min-width: 220px; pointer-events: none }
+.rec i { grid-row: span 2; width: 12px; height: 12px; border-radius: 50%; background: var(--rec); animation: recpulse 1s ease-in-out infinite }
+.rec b { font-variant-numeric: tabular-nums }
+.rec span { font-size: 13px; color: var(--muted) }
+.rec.away i { background: var(--idle); animation: none }
+.rec.busy i { background: var(--accent); animation: recpulse .6s ease-in-out infinite }
+@keyframes recpulse { 50% { transform: scale(.55); opacity: .5 } }
+@media (prefers-reduced-motion: reduce) { .rec i { animation: none } }

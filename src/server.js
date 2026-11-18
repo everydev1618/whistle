@@ -9,7 +9,7 @@ import { HerdrError } from './herdr.js';
 
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
-const STATUS_FOR = { agent_blocked: 409, agent_not_ready: 409, agent_not_found: 404, not_found: 404, unreachable: 503, timeout: 504 };
+const STATUS_FOR = { voice_off: 503, agent_blocked: 409, agent_not_ready: 409, agent_not_found: 404, not_found: 404, unreachable: 503, timeout: 504 };
 
 const send = (res, code, body) => {
   res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -48,7 +48,7 @@ async function readJson(req) {
   try { return JSON.parse(body.toString() || '{}'); } catch { throw new HerdrError('bad_json', 'body is not JSON'); }
 }
 
-export function createServer({ hub, folders = null, allowedUsers = [], prefs = null, marks = null, uploads = null, version = appVersion(), log = console.log }) {
+export function createServer({ hub, folders = null, allowedUsers = [], prefs = null, marks = null, uploads = null, transcriber = null, version = appVersion(), log = console.log }) {
   return http.createServer(async (req, res) => {
     if (allowedUsers.length && !allowedUsers.includes(req.headers['tailscale-user-login'])) {
       return fail(res, 403, 'forbidden', 'This tailnet user is not allowed.');
@@ -73,6 +73,13 @@ export function createServer({ hub, folders = null, allowedUsers = [], prefs = n
         const file = uploads.save(await readBody(req, 25 * 1024 * 1024), req.headers['content-type']);
         log(`${req.headers['tailscale-user-login'] || 'local'} uploaded ${path.basename(file)}`);
         return send(res, 201, { path: file });
+      }
+
+      if (req.method === 'POST' && parts[1] === 'transcribe' && parts.length === 2) {
+        if (!transcriber) return fail(res, 503, 'voice_off', 'Voice is off on this Mac.');
+        const text = await transcriber.transcribe(await readBody(req, 25 * 1024 * 1024), req.headers['content-type'] || '');
+        log(`${req.headers['tailscale-user-login'] || 'local'} spoke ${JSON.stringify(text.slice(0, 80))}`);
+        return send(res, 200, { text });
       }
 
       if (req.method === 'POST' && parts[1] === 'spaces' && parts.length === 2) {
@@ -152,7 +159,7 @@ export function createServer({ hub, folders = null, allowedUsers = [], prefs = n
       return fail(res, 404, 'not_found', 'No such endpoint.');
     } catch (e) {
       if (e instanceof HerdrError) {
-        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image', 'bad_folder', 'bad_space', 'bad_repo'].includes(e.code) ? 400 : 502);
+        const code = STATUS_FOR[e.code] ?? (['too_large', 'bad_json', 'bad_queue', 'bad_image', 'bad_audio', 'bad_folder', 'bad_space', 'bad_repo'].includes(e.code) ? 400 : 502);
         return fail(res, code, e.code, e.message);
       }
       console.error(e);

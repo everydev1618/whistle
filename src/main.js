@@ -11,6 +11,7 @@ import { Marks } from './marks.js';
 import { Queue } from './queue.js';
 import { Uploads } from './uploads.js';
 import { Folders } from './folders.js';
+import { Transcriber } from './transcribe.js';
 
 const home = os.homedir();
 const herdrDir = process.env.HERDR_CONFIG_DIR || path.join(home, '.config', 'herdr');
@@ -29,10 +30,16 @@ const nextSteps = process.env.WHISTLE_NEXT_STEPS === 'off' ? null : new NextStep
   run: prompt => runClaude(prompt, { bin: process.env.WHISTLE_CLAUDE_BIN || 'claude', configDir: process.env.WHISTLE_CLAUDE_CONFIG_DIR }),
 });
 
+// Hold-to-talk runs whisper.cpp here. WHISTLE_VOICE=off turns it off.
+const transcriber = process.env.WHISTLE_VOICE === 'off' ? null : new Transcriber({
+  model: process.env.WHISTLE_WHISPER_MODEL || path.join(stateDir, 'models', 'ggml-large-v3-turbo-q5_0.bin'),
+  whisper: process.env.WHISTLE_WHISPER_BIN || 'whisper-cli',
+});
+
 const hub = new Hub({ sessions: () => findSessions(herdrDir), claudeDir, vocab: loadVocab(claudeDir), nextSteps, queue: new Queue(path.join(stateDir, 'queue.json')) });
 setInterval(() => { hub.vocab = loadVocab(claudeDir); }, 10 * 60 * 1000).unref();
 hub.start();
 
-createServer({ hub, folders, allowedUsers, prefs: new Prefs(path.join(stateDir, 'prefs.json')), marks: new Marks(path.join(stateDir, 'marks.json')), uploads: new Uploads(path.join(stateDir, 'uploads')) }).listen(port, host, () => {
+createServer({ hub, folders, allowedUsers, prefs: new Prefs(path.join(stateDir, 'prefs.json')), marks: new Marks(path.join(stateDir, 'marks.json')), uploads: new Uploads(path.join(stateDir, 'uploads')), transcriber }).listen(port, host, () => {
   console.log(`whistle on http://${host}:${port}  herdr=${herdrDir}  claude=${claudeDir}  users=${allowedUsers.join(',') || 'any'}  next-steps=${nextSteps ? 'on' : 'off'}`);
 });

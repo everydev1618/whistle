@@ -43,6 +43,9 @@ Share → Add to Home Screen.
 | `WHISTLE_ALLOWED_USERS` | anyone | checked against `Tailscale-User-Login` |
 | `WHISTLE_STATE_DIR` | `~/.config/whistle` | per-user settings (`prefs.json`), seen/done marks (`marks.json`), queued messages (`queue.json`), cached Haiku suggestions (`nextsteps.json`), screenshots from the phone (`uploads/`, cleared after a week) |
 | `WHISTLE_NEXT_STEPS` | on | `off` disables the Haiku next-step buttons |
+| `WHISTLE_VOICE` | on | `off` turns hold-to-talk off |
+| `WHISTLE_WHISPER_MODEL` | `<state dir>/models/ggml-large-v3-turbo-q5_0.bin` | |
+| `WHISTLE_WHISPER_BIN` | `whisper-cli` | |
 | `WHISTLE_CLAUDE_BIN` | `claude` | CLI used for next steps |
 | `WHISTLE_CLAUDE_CONFIG_DIR` | inherited | which Claude login the CLI uses |
 
@@ -66,6 +69,7 @@ per pane, so Whistle polls `agent.list` on every session every 1.5s and diffs.
 | `POST /api/agents/:id/keys` | `{ "keys": ["esc"] }` → `agent.send_keys` |
 | `POST /api/agents/:id/queue` | `{ "text" }` → held until the agent finishes its turn, then sent |
 | `DELETE /api/agents/:id/queue/:item` | cancel a queued message |
+| `POST /api/transcribe` | raw audio body (`audio/mp4` from iPhone, `audio/webm`, ≤25 MB) → `{ "text" }`, via whisper.cpp on this Mac. Empty text means nothing was said |
 | `POST /api/uploads` | raw image body (`content-type: image/png\|jpeg\|gif\|webp`, ≤25 MB) → `{ "path" }` on this Mac. The app adds `[Image: <path>]` lines to the prompt so the agent reads it |
 | `GET /api/events` | SSE: `snapshot`, then `change` (added / changed / removed / spaces) |
 | `GET /api/marks`, `POST /api/marks` | which agents you've seen / marked done, per turn: `{ "id", "kind": "seen"\|"done"\|"undone", "turn" }` |
@@ -89,6 +93,23 @@ Three layers, merged in this order (max 4, no repeats):
 
 In the session view a model button shows the prompt it will send; long-press any button to
 edit its text before sending.
+
+## Hold to talk
+
+A space's page has a **Hold to talk** bar; each agent's composer has a mic. Hold, talk, let go.
+The phone records, `POST /api/transcribe` runs ffmpeg (to 16 kHz wav) then whisper.cpp, and the text
+goes out: in a space it starts a new agent with it as the first message; in an agent it's added
+after anything typed and sent (or queued, if the agent is working). Slide off the button to cancel.
+About 1s for a short message once the model is warm. Whisper's usual words for silence ("you",
+"Thank you.") count as nothing said.
+
+Setup on the Mac, once:
+
+```sh
+brew install whisper-cpp ffmpeg
+mkdir -p ~/.config/whistle/models && curl -L -o ~/.config/whistle/models/ggml-large-v3-turbo-q5_0.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin
+```
 
 ## Queue
 
