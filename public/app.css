@@ -291,3 +291,12 @@ button:active, .chip:active, .tile:active, .wide:active, .rest:active, .card .op
 .rec.busy i { background: var(--accent); animation: recpulse .6s ease-in-out infinite }
 @keyframes recpulse { 50% { transform: scale(.55); opacity: .5 } }
 @media (prefers-reduced-motion: reduce) { .rec i { animation: none } }
+
+/* tap to brainstorm */
+.holdtalk span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15 }
+.holdtalk small { font-size: 12px; font-weight: 500; opacity: .8 }
+.rec.free { pointer-events: auto; max-width: calc(100vw - 32px) }
+.rec.free i { animation-duration: 1.6s }
+.rec-acts { grid-column: 1 / -1; display: flex; gap: 8px; margin-top: 10px }
+.rec-acts button { flex: 1; height: 40px; border-radius: 20px; border: 1px solid var(--line); background: var(--card); font-weight: 700 }
+.rec-acts #rec-go { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }

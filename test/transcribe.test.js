@@ -56,3 +56,11 @@ test('whisper\'s usual words for silence count as nothing said', () => {
   for (const ghost of ['you', ' You.', 'Thank you.', 'Thanks for watching!', '.', 'Bye.']) assert.equal(cleanTranscript(ghost), '', ghost);
   assert.equal(cleanTranscript('Thank you, now push it.'), 'Thank you, now push it.');
 });
+
+test('gives long recordings minutes, not seconds, to transcribe', async () => {
+  const timeouts = [];
+  const run = async (bin, args, opts = {}) => { timeouts.push(opts.timeout); if (bin === 'ffmpeg') fs.writeFileSync(args.at(-1), 'w'); return 'Long one.'; };
+  await new Transcriber({ model: model(), dir: tmp(), run }).transcribe(Buffer.from('a'), 'audio/mp4');
+  assert.equal(timeouts.length, 2);
+  assert.ok(timeouts.every(t => t >= 10 * 60_000), String(timeouts));
+});

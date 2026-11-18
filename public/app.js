@@ -1,7 +1,7 @@
 import { mdBlocks } from './md.js';
 import { groupAgents, isSeen, isDone, turnKey, spaceTiles, spaceAgents, arrangeSpaces } from './herd.js';
 import { withImages } from './attach.js';
-import { recordingType, releaseOutcome, spokenDraft, routeTitle, autoGo, AUTO_GO_MS, CANCEL_PX } from './voice.js';
+import { recordingType, releaseOutcome, spokenDraft, routeTitle, autoGo, brainstormPrompt, AUTO_GO_MS, CANCEL_PX } from './voice.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -437,12 +437,13 @@ function deleteSpace(sp, mine) {
 
 // Something said into the home-screen mic: Haiku on the Mac picks where it goes,
 // this card shows it. Safe places start by themselves after a moment unless you touch the card.
-function routeSheet(said) {
+function routeSheet(said, { brainstorm = false } = {}) {
   closeSheet();
   const scrim = Object.assign(document.createElement('div'), { className: 'scrim' });
   const sheet = Object.assign(document.createElement('form'), { className: 'sheet make route' });
   sheet.innerHTML = `<b class="ct" id="rt-title">Working out where that goes…</b>
     <p class="note" id="rt-sub"></p>
+    ${brainstorm ? '<p class="note">Goes as a brainstorm: Claude talks it through with you and changes nothing until you say go.</p>' : ''}
     <textarea id="rt-prompt" aria-label="Message">${esc(said)}</textarea>
     <div class="else" id="rt-else" hidden>
       <input id="rt-find" type="search" placeholder="Find a space" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -511,12 +512,13 @@ function routeSheet(said) {
     e.preventDefault();
     if (!route || route.kind === 'unsure' || go.disabled) return;
     stopCountdown();
-    const prompt = text.value;
+    const prompt = brainstorm ? brainstormPrompt(text.value) : text.value;
+    const label = route.label || (brainstorm ? 'Brainstorm' : '');
     go.disabled = true;
     go.textContent = route.kind === 'clone' ? 'Cloning…' : 'Starting Claude…';
     try {
-      if (route.kind === 'space') await startAgent(route.spaceId, route.label, prompt, close);
-      else await startSpace({ label: route.label, prompt, ...(route.kind === 'folder' ? { cwd: route.cwd } : route.kind === 'init' ? { init: true } : { clone: route.repo }) }, close);
+      if (route.kind === 'space') await startAgent(route.spaceId, label, prompt, close);
+      else await startSpace({ label, prompt, ...(route.kind === 'folder' ? { cwd: route.cwd } : route.kind === 'init' ? { init: true } : { clone: route.repo }) }, close);
     } catch {
       go.disabled = false;
       go.textContent = 'Start Claude';
@@ -1100,81 +1102,66 @@ $('#composer').addEventListener('submit', async e => {
 
 // ---------- hold to talk ----------
 // Hold the mic and talk; let go to send, slide away to throw it away.
-// The phone records, whisper on the Mac turns it into text, then `onText` decides where it goes.
+// Tap it instead to talk hands-free (a brainstorm) until you tap it again or press Send.
+// The phone records, whisper on the Mac turns it into text, then `onText(text, { brainstorm })` decides where it goes.
+let talking = null; // the mic that's recording, so two never run at once
+$('#rec-go').onclick = () => talking?.finish('send');
+$('#rec-x').onclick = () => talking?.finish('cancel');
+
 function holdToTalk(btn, onText) {
-  let pressing = false, busy = false, rec = null, stream = null, chunks = [], t0 = 0, x0 = 0, y0 = 0, tick = null;
+  let pressing = false, free = false, busy = false, rec = null, stream = null, chunks = [], t0 = 0, down = 0, x0 = 0, y0 = 0, tick = null, lock = null;
   const panel = $('#rec');
+  const me = { finish: outcome => finish(outcome) };
   const show = (cls, title, sub) => {
     panel.hidden = false;
     panel.className = `rec ${cls}`;
     panel.style.bottom = `${(btn.closest('footer')?.offsetHeight ?? 80) + 14}px`; // just above the bar it came from
     $('#rec-t').textContent = title;
     $('#rec-s').textContent = sub;
-    btn.classList.toggle('on', cls === 'on');
+    $('#rec-acts').hidden = cls !== 'free';
+    btn.classList.toggle('on', cls === 'on' || cls === 'free');
     btn.classList.toggle('away', cls === 'away');
     btn.classList.toggle('busy', cls === 'busy');
   };
   const reset = () => {
     clearInterval(tick);
     stream?.getTracks().forEach(t => t.stop());
-    stream = rec = null;
+    lock?.release().catch(() => {});
+    stream = rec = lock = null;
+    free = pressing = false;
+    if (talking === me) talking = null;
     panel.hidden = true;
+    $('#rec-acts').hidden = true;
     btn.classList.remove('on', 'away', 'busy');
   };
   const clock = () => { const s = Math.floor((Date.now() - t0) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+  const title = () => `${free ? 'Brainstorming' : 'Listening'}… ${clock()}`;
 
-  btn.addEventListener('contextmenu', e => e.preventDefault());
-  btn.addEventListener('pointerdown', async e => {
-    e.preventDefault();
-    if (pressing || busy || rec) return;
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record audio.');
-    pressing = true;
-    x0 = e.clientX; y0 = e.clientY;
-    btn.setPointerCapture?.(e.pointerId);
-    show('on', 'Listening…', 'Slide away to cancel');
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      pressing = false;
-      reset();
-      return toast('Whistle needs the microphone. Allow it in Settings › Safari › Microphone.', null, 5000);
-    }
-    if (!pressing) return reset(); // let go while the permission prompt was up
-    const type = recordingType(t => MediaRecorder.isTypeSupported(t));
-    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-    chunks = [];
-    rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
-    rec.start();
-    t0 = Date.now();
-    navigator.vibrate?.(10);
-    tick = setInterval(() => { if (btn.classList.contains('on')) $('#rec-t').textContent = `Listening… ${clock()}`; }, 250);
-  });
-  btn.addEventListener('pointermove', e => {
-    if (!pressing || !rec) return;
-    const away = Math.hypot(e.clientX - x0, e.clientY - y0) > CANCEL_PX;
-    if (away !== btn.classList.contains('away')) show(away ? 'away' : 'on', away ? 'Let go to cancel' : `Listening… ${clock()}`, away ? 'Slide back to keep it' : 'Slide away to cancel');
-  });
-  const release = e => {
-    if (!pressing) return;
-    pressing = false;
-    if (!rec) return; // still waiting on the microphone; reset happens there
+  const goFree = () => {
+    free = true;
+    navigator.vibrate?.([10, 60, 10]);
+    show('free', title(), 'Talk as long as you like. Tap the mic or Send when you\'re done.');
+    navigator.wakeLock?.request('screen').then(l => { lock = l; }).catch(() => {}); // a locked screen stops the mic
+  };
+
+  const finish = outcome => {
     const r = rec;
-    const outcome = e.type === 'pointercancel' ? 'cancel' : releaseOutcome({ ms: Date.now() - t0, dx: e.clientX - x0, dy: e.clientY - y0 });
+    if (!r) return reset();
+    const brainstorm = free;
     clearInterval(tick);
     r.onstop = async () => {
       const blob = new Blob(chunks, { type: r.mimeType || 'audio/mp4' });
       reset();
-      if (outcome === 'short') return toast('Hold the mic while you talk.');
       if (outcome === 'cancel') return;
       busy = true;
-      show('busy', 'Transcribing…', 'One moment');
+      show('busy', 'Transcribing…', brainstorm ? 'A long one takes a few seconds' : 'One moment');
       try {
         const res = await fetch('/api/transcribe', { method: 'POST', headers: { 'content-type': blob.type }, body: blob });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
         reset();
         if (!data.text) toast("Didn't catch that. Try again a little closer.");
-        else await onText(data.text);
+        else await onText(data.text, { brainstorm });
       } catch (err) {
         reset();
         toast(`Not transcribed: ${err.message}`, null, 5000);
@@ -1182,17 +1169,60 @@ function holdToTalk(btn, onText) {
     };
     r.stop();
   };
+
+  btn.addEventListener('contextmenu', e => e.preventDefault());
+  btn.addEventListener('pointerdown', async e => {
+    e.preventDefault();
+    if (free && talking === me) return finish('send'); // the second tap ends a brainstorm
+    if (pressing || busy || rec || talking) return;
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast('This browser cannot record audio.');
+    talking = me;
+    pressing = true;
+    down = t0 = Date.now();
+    x0 = e.clientX; y0 = e.clientY;
+    try { btn.setPointerCapture?.(e.pointerId); } catch { /* the pointer is already gone */ }
+    show('on', 'Listening…', 'Let go to send · slide away to cancel');
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      reset();
+      return toast('Whistle needs the microphone. Allow it in Settings › Safari › Microphone.', null, 5000);
+    }
+    if (!pressing && !free) return reset(); // let go (or slid away) while the permission prompt was up
+    const type = recordingType(t => MediaRecorder.isTypeSupported(t));
+    rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    chunks = [];
+    rec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+    rec.start();
+    t0 = Date.now();
+    navigator.vibrate?.(10);
+    tick = setInterval(() => { if (btn.classList.contains('on')) $('#rec-t').textContent = title(); }, 250);
+  });
+  btn.addEventListener('pointermove', e => {
+    if (!pressing || !rec) return;
+    const away = Math.hypot(e.clientX - x0, e.clientY - y0) > CANCEL_PX;
+    if (away !== btn.classList.contains('away')) show(away ? 'away' : 'on', away ? 'Let go to cancel' : title(), away ? 'Slide back to keep it' : 'Let go to send · slide away to cancel');
+  });
+  const release = e => {
+    if (!pressing) return;
+    pressing = false;
+    const outcome = e.type === 'pointercancel' ? 'cancel' : releaseOutcome({ ms: Date.now() - down, dx: e.clientX - x0, dy: e.clientY - y0 });
+    if (outcome === 'tap') return goFree(); // keeps listening, even if the mic isn't on yet
+    if (!rec) return; // still waiting on the microphone; reset happens there
+    finish(outcome);
+  };
   btn.addEventListener('pointerup', release);
   btn.addEventListener('pointercancel', release);
 }
 
 // On the home screen: Haiku picks the space, folder or repo; the card confirms it.
-holdToTalk($('#home-mic'), text => routeSheet(text));
+holdToTalk($('#home-mic'), (text, { brainstorm }) => routeSheet(text, { brainstorm }));
 // In a space: what you said starts a new agent there.
-holdToTalk($('#sp-mic'), text => startAgent(state.spaceId, '', text).catch(() => {}));
+holdToTalk($('#sp-mic'), (text, { brainstorm }) => startAgent(state.spaceId, brainstorm ? 'Brainstorm' : '', brainstorm ? brainstormPrompt(text) : text).catch(() => {}));
 // In an agent: it goes in the composer after anything typed, and sends (or queues).
-holdToTalk($('#mic'), text => {
+holdToTalk($('#mic'), (text, { brainstorm }) => {
   draft.value = spokenDraft(draft.value, text);
+  if (brainstorm) draft.value = brainstormPrompt(draft.value);
   grow(draft);
   $('#composer').requestSubmit();
 });

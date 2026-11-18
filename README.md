@@ -104,6 +104,12 @@ after anything typed and sent (or queued, if the agent is working). Slide off th
 About 1s for a short message once the model is warm. Whisper's usual words for silence ("you",
 "Thank you.") count as nothing said.
 
+**Tap to brainstorm.** Tap any of the three mics instead of holding it and it keeps listening
+hands-free until you tap it again or press Send (Cancel throws it away). The screen stays awake
+meanwhile, since a locked phone stops the mic. What you said goes out with a note asking Claude to
+think it through with you and change nothing until you say go; in a space the new tab is named
+Brainstorm. Two minutes of talk transcribes in about 3s; the limit is 15 minutes per step.
+
 The home screen has one too, for anything: "in whistle, make the toast stay longer", "start a new
 repo called tide tables and scaffold a node server", "clone hop and add a high score". Haiku gets
 what you said plus every space, folder in ~/Code and GitHub repo (`POST /api/route`), and a card

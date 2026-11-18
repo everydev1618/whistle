@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recordingType, releaseOutcome, spokenDraft, routeTitle, autoGo } from '../public/voice.js';
+import { recordingType, releaseOutcome, spokenDraft, routeTitle, autoGo, brainstormPrompt } from '../public/voice.js';
 
 test('records in the first type the browser supports', () => {
   assert.equal(recordingType(t => t === 'audio/mp4'), 'audio/mp4'); // iPhone Safari
@@ -8,8 +8,8 @@ test('records in the first type the browser supports', () => {
   assert.equal(recordingType(() => false), '');
 });
 
-test('a quick tap is not a recording, sliding away cancels, otherwise it sends', () => {
-  assert.equal(releaseOutcome({ ms: 200, dx: 0, dy: 0 }), 'short');
+test('a quick tap keeps listening hands-free, sliding away cancels, otherwise it sends', () => {
+  assert.equal(releaseOutcome({ ms: 200, dx: 0, dy: 0 }), 'tap');
   assert.equal(releaseOutcome({ ms: 2000, dx: 0, dy: -120 }), 'cancel');
   assert.equal(releaseOutcome({ ms: 2000, dx: 100, dy: 0 }), 'cancel');
   assert.equal(releaseOutcome({ ms: 2000, dx: 20, dy: -30 }), 'send');
@@ -32,4 +32,12 @@ test('a routed message reads as where it will go, and only safe places go by the
   assert.equal(autoGo({ kind: 'init' }), false);
   assert.equal(autoGo({ kind: 'clone' }), false);
   assert.equal(autoGo({ kind: 'unsure' }), false);
+});
+
+test('a brainstorm keeps what was said first and asks Claude to talk, not build', () => {
+  const p = brainstormPrompt('  What if spaces had a mood board?  ');
+  assert.ok(p.startsWith('What if spaces had a mood board?\n\n'));
+  assert.match(p, /brainstorm/i);
+  assert.match(p, /don't change any files/i);
+  assert.match(p, /until I say go/i);
 });

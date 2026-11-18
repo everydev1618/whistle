@@ -28,9 +28,12 @@ export function cleanTranscript(out) {
   return GHOSTS.has(text.toLowerCase().replace(/[^a-z ]/g, '').trim()) ? '' : text;
 }
 
+// A tap-to-brainstorm recording can run many minutes; whisper does about a minute of speech a second.
+const TIMEOUT_MS = 15 * 60_000;
+
 export class Transcriber {
-  constructor({ model, whisper = 'whisper-cli', ffmpeg = 'ffmpeg', language = 'en', dir = os.tmpdir(), run = runCmd }) {
-    Object.assign(this, { model, whisper, ffmpeg, language, dir, run });
+  constructor({ model, whisper = 'whisper-cli', ffmpeg = 'ffmpeg', language = 'en', dir = os.tmpdir(), run = runCmd, timeoutMs = TIMEOUT_MS }) {
+    Object.assign(this, { model, whisper, ffmpeg, language, dir, run, timeoutMs });
   }
 
   async transcribe(buf, contentType = '') {
@@ -41,8 +44,8 @@ export class Transcriber {
     const input = `${stem}.in`, wav = `${stem}.wav`;
     try {
       fs.writeFileSync(input, buf);
-      await this.run(this.ffmpeg, ['-loglevel', 'error', '-y', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
-      return cleanTranscript(await this.run(this.whisper, ['-m', this.model, '-f', wav, '-l', this.language, '-nt', '-np']));
+      await this.run(this.ffmpeg, ['-loglevel', 'error', '-y', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav], { timeout: this.timeoutMs });
+      return cleanTranscript(await this.run(this.whisper, ['-m', this.model, '-f', wav, '-l', this.language, '-nt', '-np'], { timeout: this.timeoutMs }));
     } catch (e) {
       if (e instanceof HerdrError) throw e;
       throw new HerdrError('transcribe_failed', `Couldn't transcribe that: ${(e.stderr || e.message || '').trim().split('\n').pop()}`);
