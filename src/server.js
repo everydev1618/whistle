@@ -84,9 +84,9 @@ export function createServer({ hub, folders = null, allowedUsers = [], prefs = n
 
       if (req.method === 'POST' && parts[1] === 'route' && parts.length === 2) {
         if (!router) return fail(res, 503, 'route_off', 'Routing is off on this Mac.');
-        const { text } = await readJson(req);
+        const { text, brainstorm = false } = await readJson(req);
         if (typeof text !== 'string' || !text.trim()) return fail(res, 400, 'empty_prompt', 'Nothing to route.');
-        const route = await router.route(text.trim());
+        const route = await router.route(text.trim(), brainstorm === true ? { brainstorm: true } : {});
         log(`${req.headers['tailscale-user-login'] || 'local'} routed ${JSON.stringify(text.slice(0, 80))} → ${route.kind} ${route.where || ''}`);
         return send(res, 200, route);
       }

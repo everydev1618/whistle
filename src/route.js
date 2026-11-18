@@ -28,9 +28,13 @@ const MAX_REPOS = 200;
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s);
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-export function buildRoutePrompt({ text, spaces = [], folders = [], repos = [] }) {
+// A brainstorm about a new idea shouldn't stall on "where?": name a new repo for it instead.
+const BRAINSTORM_NOTE = 'This is a brainstorm (thinking out loud), not a task. If it is about one of the projects below, route it there. If nothing fits, use "init" with a short name for the idea (1 to 3 words, e.g. "Mood board") instead of "unsure"; only say "unsure" when it could be several of the projects below.';
+
+export function buildRoutePrompt({ text, brainstorm = false, spaces = [], folders = [], repos = [] }) {
   return [
     `They said: ${text}`,
+    ...(brainstorm ? [BRAINSTORM_NOTE] : []),
     `Open spaces (id | name | folder):\n${spaces.map(s => `- ${s.id} | ${s.label} | ${s.cwd || '?'}`).join('\n') || '- none'}`,
     `Folders on the Mac (name | path):\n${folders.slice(0, MAX_FOLDERS).map(f => `- ${f.name} | ${f.path}`).join('\n') || '- none'}`,
     `GitHub repos (owner/name | description):\n${repos.slice(0, MAX_REPOS).map(r => `- ${r.full}${r.description ? ` | ${clip(r.description, 80)}` : ''}`).join('\n') || '- none'}`,
@@ -89,14 +93,14 @@ export class Router {
     return this.hub.spaces().map(s => ({ ...s, cwd: agents.find(a => a.spaceId === s.id && a.cwd)?.cwd || '' }));
   }
 
-  async route(text) {
+  async route(text, { brainstorm = false } = {}) {
     const ctx = {
       spaces: this.#spaces(),
       folders: this.folders?.list() ?? [],
       repos: await (this.folders?.repos() ?? Promise.resolve([])).catch(() => []),
     };
     let out = null;
-    try { out = await this.run(buildRoutePrompt({ text, ...ctx })); } catch (e) { this.log(`routing failed: ${e.message}`); }
+    try { out = await this.run(buildRoutePrompt({ text, brainstorm, ...ctx })); } catch (e) { this.log(`routing failed: ${e.message}`); }
     return cleanRoute(out, ctx, text);
   }
 }

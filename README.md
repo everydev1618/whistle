@@ -108,7 +108,9 @@ About 1s for a short message once the model is warm. Whisper's usual words for s
 hands-free until you tap it again or press Send (Cancel throws it away). The screen stays awake
 meanwhile, since a locked phone stops the mic. What you said goes out with a note asking Claude to
 think it through with you and change nothing until you say go; in a space the new tab is named
-Brainstorm. Two minutes of talk transcribes in about 3s; the limit is 15 minutes per step.
+Brainstorm. On the home screen, a brainstorm that fits no space, folder or repo comes back as a new
+repo named for the idea ("New repo ~/Code/tide-alerts"); change the name on the card, then tap to start it.
+Two minutes of talk transcribes in about 3s; the limit is 15 minutes per step.
 
 The home screen has one too, for anything: "in whistle, make the toast stay longer", "start a new
 repo called tide tables and scaffold a node server", "clone hop and add a high score". Haiku gets

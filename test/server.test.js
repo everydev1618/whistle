@@ -276,7 +276,7 @@ test('POST /api/transcribe maps bad audio to 400', async () => {
 
 test('POST /api/route says where spoken words should go, 503 when routing is off', async () => {
   const seen = [];
-  const router = { async route(text) { seen.push(text); return { kind: 'space', spaceId: 'default/w1', where: 'proj', label: '', prompt: 'fix it' }; } };
+  const router = { async route(text, opts = {}) { seen.push(opts.brainstorm ? [text, 'brainstorm'] : text); return { kind: 'space', spaceId: 'default/w1', where: 'proj', label: '', prompt: 'fix it' }; } };
   const s = createServer({ hub: new FakeHub(), router, log: () => {} });
   await new Promise(r => s.listen(0, '127.0.0.1', r));
   const at = `http://127.0.0.1:${s.address().port}/api/route`;
@@ -286,6 +286,8 @@ test('POST /api/route says where spoken words should go, 503 when routing is off
     assert.equal(r.status, 200);
     assert.equal((await r.json()).spaceId, 'default/w1');
     assert.deepEqual(seen, ['in proj fix it']);
+    await postTo({ text: 'what if', brainstorm: true });
+    assert.deepEqual(seen.at(-1), ['what if', 'brainstorm']);
     assert.equal((await postTo({ text: '  ' })).status, 400);
   } finally { s.close(); }
   const off = await post('/api/route', { text: 'fix it' });

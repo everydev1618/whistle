@@ -444,6 +444,7 @@ function routeSheet(said, { brainstorm = false } = {}) {
   sheet.innerHTML = `<b class="ct" id="rt-title">Working out where that goes…</b>
     <p class="note" id="rt-sub"></p>
     ${brainstorm ? '<p class="note">Goes as a brainstorm: Claude talks it through with you and changes nothing until you say go.</p>' : ''}
+    <input id="rt-name" aria-label="Name for the new repo" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="40" hidden>
     <textarea id="rt-prompt" aria-label="Message">${esc(said)}</textarea>
     <div class="else" id="rt-else" hidden>
       <input id="rt-find" type="search" placeholder="Find a space" autocomplete="off" autocapitalize="off" spellcheck="false">
@@ -478,6 +479,8 @@ function routeSheet(said, { brainstorm = false } = {}) {
     sub.hidden = !(r.kind === 'init' || r.kind === 'clone');
     sub.textContent = r.kind === 'init' ? 'Makes the folder and runs git init.' : r.kind === 'clone' ? 'Clones it into ~/Code first.' : '';
     text.value = r.prompt;
+    name.hidden = r.kind !== 'init';
+    if (r.kind === 'init') name.value = r.label || r.where;
     go.disabled = r.kind === 'unsure';
     go.textContent = 'Start Claude';
     if (r.kind === 'unsure') showElse();
@@ -495,6 +498,14 @@ function routeSheet(said, { brainstorm = false } = {}) {
     const many = state.sessions.length > 1;
     const hits = [...state.spaces].filter(sp => !q || sp.label.toLowerCase().includes(q)).sort((a, b) => a.label.localeCompare(b.label));
     $('#rt-picks', sheet).innerHTML = hits.map(sp => `<button type="button" data-space="${esc(sp.id)}" class="${route?.spaceId === sp.id ? 'on' : ''}"><span>${esc(sp.label)}</span>${many ? `<small>${esc(sp.session)}</small>` : ''}</button>`).join('') || '<p class="note">No spaces match.</p>';
+  };
+  // A new repo's name can be changed before it's made.
+  const name = $('#rt-name', sheet);
+  name.oninput = () => {
+    if (route?.kind !== 'init') return;
+    route = { ...route, label: name.value.trim(), where: slugify(name.value) };
+    title.textContent = routeTitle(route);
+    go.disabled = !route.where;
   };
   $('#rt-other', sheet).onclick = showElse;
   $('#rt-find', sheet).oninput = drawPicks;
@@ -526,7 +537,7 @@ function routeSheet(said, { brainstorm = false } = {}) {
   };
 
   document.body.append(scrim, sheet);
-  api('/api/route', { text: said })
+  api('/api/route', { text: said, brainstorm })
     .then(r => { if (!closed) show(r); })
     .catch(err => { if (!closed) { show({ kind: 'unsure', label: '', prompt: said }); toast(`Couldn't pick a place: ${err.message}`, null, 4000); } });
 }

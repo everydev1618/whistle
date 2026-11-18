@@ -88,3 +88,18 @@ test('the router still works when GitHub cannot be reached, and says unsure when
   const bad = new Router({ hub, folders, run: async () => { throw new Error('boom'); }, log: () => {} });
   assert.deepEqual(await bad.route('do it'), { kind: 'unsure', label: '', prompt: 'do it' });
 });
+
+test('a brainstorm that fits nothing asks for a new repo named for the idea, not unsure', () => {
+  const plain = buildRoutePrompt({ text: 'what if mood boards', ...ctx });
+  const bs = buildRoutePrompt({ text: 'what if mood boards', brainstorm: true, ...ctx });
+  assert.doesNotMatch(plain, /brainstorm/i);
+  assert.match(bs, /brainstorm/i);
+  assert.match(bs, /"init"/);
+});
+
+test('the router passes the brainstorm along to the model', async () => {
+  const prompts = [];
+  const r = new Router({ hub: { agents: () => [], spaces: () => [] }, folders: null, run: async p => { prompts.push(p); return { kind: 'init', target: 'Mood board', label: 'Mood board', prompt: 'what if mood boards' }; } });
+  assert.deepEqual(await r.route('what if mood boards', { brainstorm: true }), { kind: 'init', label: 'Mood board', where: 'mood-board', prompt: 'what if mood boards' });
+  assert.match(prompts[0], /brainstorm/i);
+});
